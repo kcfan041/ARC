@@ -1,0 +1,7 @@
+# 依賴與建置產物
+node_modules/
+dist/
+*.tsbuildinfo
+
+# OS
+.DS_Store
