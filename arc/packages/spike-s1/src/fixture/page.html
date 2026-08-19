@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>ARC S1 Fixture</title>
+<style>
+  body { font-family: ui-monospace, monospace; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+  .case { border: 1px solid #ccc; border-radius: 6px; padding: .75rem 1rem; margin: .75rem 0; }
+  .case h3 { margin: 0 0 .35rem; font-size: .95rem; }
+  .meta { color: #666; font-size: .8rem; margin: .2rem 0; }
+  button { padding: .4rem .9rem; font: inherit; cursor: pointer; }
+  #log { background: #f6f6f6; padding: .6rem; font-size: .78rem; max-height: 160px; overflow: auto; }
+</style>
+</head>
+<body>
+
+<h1>ARC S1 Fixture</h1>
+<p class="meta">
+  操作觸發的 request 走 <code>/api/data</code>，
+  雜訊走 <code>/api/poll</code> 與 <code>/api/prefetch</code>。
+  ground truth 由建構方式決定。
+</p>
+
+<div class="case">
+  <h3>c1 — 點擊 → 立即 fetch</h3>
+  <div class="meta">expect: [c1]</div>
+  <button id="c1-btn">觸發 c1</button>
+</div>
+
+<div class="case">
+  <h3>c2 — 點擊 → debounce 300ms</h3>
+  <div class="meta">expect: [c2]　測時間窗下界</div>
+  <button id="c2-btn">觸發 c2</button>
+</div>
+
+<div class="case">
+  <h3>c3 — 點擊 → await 兩層後才 fetch</h3>
+  <div class="meta">expect: [c3]　測 async 邊界</div>
+  <button id="c3-btn">觸發 c3</button>
+</div>
+
+<div class="case">
+  <h3>c4 — 背景輪詢（自動，獨立端點）</h3>
+  <div class="meta">expect: []　/api/poll 每 700ms　策略 C 應能濾除</div>
+</div>
+
+<div class="case">
+  <h3>c5 — 點擊 → 功能 API + analytics</h3>
+  <div class="meta">expect: [c5-api, c5-analytics]</div>
+  <button id="c5-btn">觸發 c5</button>
+</div>
+
+<div class="case">
+  <h3>c6 — 點擊 → 不發 request</h3>
+  <div class="meta">expect: []　負例</div>
+  <button id="c6-btn">觸發 c6</button>
+</div>
+
+<div class="case">
+  <h3>c7 — 快速連點兩次</h3>
+  <div class="meta">expect: [c7-1, c7-2]　測 race</div>
+  <button id="c7-btn">觸發 c7（快速點兩下）</button>
+</div>
+
+<div class="case">
+  <h3>c8 — prefetch（點擊後才注入）</h3>
+  <div class="meta">
+    expect: []　點擊後注入 &lt;link rel=prefetch&gt;，
+    initiator 應為 parser/preload，策略 B 應能濾除
+  </div>
+  <button id="c8-btn">觸發 c8</button>
+</div>
+
+<div class="case">
+  <h3>c9 — 輪詢與點擊共用同一端點</h3>
+  <div class="meta">
+    expect: [c9]　
+    /api/shared 同時被輪詢與點擊使用 —— 已知的困難情境
+  </div>
+  <button id="c9-btn">觸發 c9</button>
+</div>
+
+<h3>Log</h3>
+<div id="log"></div>
+
+<script>
+const logEl = document.getElementById('log');
+function log(msg) {
+  const t = new Date().toISOString().slice(11, 23);
+  logEl.insertAdjacentHTML('afterbegin', `<div>${t} ${msg}</div>`);
+}
+
+function hit(marker, path) {
+  const p = path || '/api/data';
+  log(`fetch ${p} marker=${marker}`);
+  return fetch(`${p}?marker=${encodeURIComponent(marker)}`).catch(() => {});
+}
+
+// c1 — 立即
+document.getElementById('c1-btn').addEventListener('click', () => {
+  hit('c1');
+});
+
+// c2 — debounce 300ms
+let c2timer;
+document.getElementById('c2-btn').addEventListener('click', () => {
+  clearTimeout(c2timer);
+  c2timer = setTimeout(() => hit('c2'), 300);
+});
+
+// c3 — await 兩層。await 之後 initiator stack 會被截斷
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+document.getElementById('c3-btn').addEventListener('click', async () => {
+  await sleep(60);
+  await sleep(60);
+  await hit('c3');
+});
+
+// c5 — 功能 API + analytics beacon
+document.getElementById('c5-btn').addEventListener('click', () => {
+  hit('c5-api');
+  hit('c5-analytics');
+});
+
+// c6 — 純 DOM 操作，不發 request
+document.getElementById('c6-btn').addEventListener('click', () => {
+  log('c6 clicked (no request)');
+  document.body.dataset.c6 = String(Date.now());
+});
+
+// c7 — 每次點擊發不同的 request
+let c7n = 0;
+document.getElementById('c7-btn').addEventListener('click', () => {
+  c7n += 1;
+  hit(`c7-${c7n}`);
+});
+
+// c8 — 點擊後注入 prefetch。
+// 刻意在互動期間才注入，否則它會落在所有 action 之前，
+// 永遠不會成為 false positive，策略 B 的價值就測不出來。
+document.getElementById('c8-btn').addEventListener('click', () => {
+  const l = document.createElement('link');
+  l.rel = 'prefetch';
+  l.href = '/api/prefetch?marker=noise-prefetch&n=' + Date.now();
+  document.head.appendChild(l);
+  log('c8 injected prefetch');
+});
+
+// c9 — 與輪詢共用同一端點
+document.getElementById('c9-btn').addEventListener('click', () => {
+  hit('c9', '/api/shared');
+});
+
+// c4 — 背景輪詢，獨立端點
+setInterval(() => { hit('noise-poll', '/api/poll'); }, 700);
+
+// 共用端點的輪詢，與 c9 相同路徑
+setInterval(() => { hit('noise-shared', '/api/shared'); }, 900);
+</script>
+
+</body>
+</html>

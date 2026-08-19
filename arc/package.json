@@ -1,0 +1,24 @@
+{
+  "name": "arc",
+  "private": true,
+  "version": "0.0.0",
+  "description": "ARC — Analysis & Runtime Cartography",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc --build",
+    "boundaries": "depcruise packages --config .dependency-cruiser.cjs",
+    "s1:fixture": "npm run start --workspace @arc/spike-s1",
+    "s1:clock": "npm run clock --workspace @arc/spike-s1",
+    "s1:measure": "npm run measure --workspace @arc/spike-s1",
+    "s1:c9": "npm run c9 --workspace @arc/spike-s1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "dependency-cruiser": "^16.9.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

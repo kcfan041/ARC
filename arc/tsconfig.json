@@ -1,0 +1,9 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core-model" },
+    { "path": "packages/browser-runtime" },
+    { "path": "packages/correlator" },
+    { "path": "packages/spike-s1" }
+  ]
+}
