@@ -13,7 +13,10 @@
     "s1:fixture": "npm run start --workspace @arc/spike-s1",
     "s1:clock": "npm run clock --workspace @arc/spike-s1",
     "s1:measure": "npm run measure --workspace @arc/spike-s1",
-    "s1:c9": "npm run c9 --workspace @arc/spike-s1"
+    "s1:c9": "npm run c9 --workspace @arc/spike-s1",
+    "gui": "tsx packages/gui-server/src/run.ts",
+    "gui:build": "npm run build --workspace @arc/gui",
+    "gui:dev": "npm run dev --workspace @arc/gui"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

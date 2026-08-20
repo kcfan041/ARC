@@ -1,9 +1,23 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/core-model" },
-    { "path": "packages/browser-runtime" },
-    { "path": "packages/correlator" },
-    { "path": "packages/spike-s1" }
+    {
+      "path": "packages/core-model"
+    },
+    {
+      "path": "packages/browser-runtime"
+    },
+    {
+      "path": "packages/correlator"
+    },
+    {
+      "path": "packages/core-tools"
+    },
+    {
+      "path": "packages/gui-server"
+    },
+    {
+      "path": "packages/spike-s1"
+    }
   ]
 }

@@ -18,9 +18,26 @@ export type PeriodicOptions = {
   maxCoefficientOfVariation?: number;
 };
 
+/**
+ * 預設值來自 GUI 原型的實測（2026-08-18）。
+ *
+ * 實測數據：
+ *   真實輪詢 /api/poll     n=130  mean=700ms  cv=0.0010
+ *   真實輪詢 /api/shared   n=101  mean=900ms  cv=0.0010
+ *   使用者點擊 /api/data   n=  3  mean=2219ms cv=0.3168
+ *
+ * 兩者相差三個數量級。初版把閾值設在 0.35，
+ * 導致三次間隔相近的使用者點擊（cv=0.317）被誤判為輪詢並濾除 ——
+ * 這在 S1 的 fixture 量測中沒有暴露，因為當時每個案例只點一次。
+ *
+ * 調整：
+ *   閾值 0.35 → 0.08   真實輪詢仍有 80 倍餘裕
+ *   最少次數 3 → 5     三個點擊湊出「規律」的機率仍不低，
+ *                      而真實輪詢在任何有意義的 session 中都遠超 5 次
+ */
 const DEFAULTS: Required<PeriodicOptions> = {
-  minOccurrences: 3,
-  maxCoefficientOfVariation: 0.35,
+  minOccurrences: 5,
+  maxCoefficientOfVariation: 0.08,
 };
 
 /**
@@ -80,17 +97,40 @@ export function detectPeriodicPatterns(
     }
     if (gaps.length < 2) continue;
 
-    const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
-    if (mean <= 0) continue;
-
-    const variance =
-      gaps.reduce((acc, g) => acc + (g - mean) ** 2, 0) / gaps.length;
-    const cv = Math.sqrt(variance) / mean;
-
-    if (cv <= cfg.maxCoefficientOfVariation) periodic.add(pattern);
+    if (robustDispersion(gaps) <= cfg.maxCoefficientOfVariation) {
+      periodic.add(pattern);
+    }
   }
 
   return periodic;
+}
+
+/**
+ * 穩健離散度 = median(|gap − medianGap|) / medianGap
+ *
+ * 為何不用標準差除以平均（一般的變異係數）：
+ *   若某端點同時被輪詢與使用者操作使用，一次點擊會把
+ *   原本 900ms 的間隔切成兩段（例如 400 + 500）。
+ *   標準差對這種離群值極度敏感 —— 單一次點擊就足以
+ *   讓整個序列不再被判定為週期性，該端點的輪詢因此
+ *   全部湧入綁定結果。
+ *
+ *   實測（GUI 原型，2026-08-18）：
+ *     此情況下 precision 從 100% 掉到 61.5%。
+ *
+ *   改用中位數為基礎的離散度後，少數離群值不影響判定：
+ *   多數間隔仍是 900ms，中位數仍是 900ms，MAD 仍接近 0。
+ *
+ * 使用者觸發的請求則交由 isOffRhythm() 以相位偏移辨識，
+ * 兩者分工：這裡判斷「這個端點有沒有節奏」，
+ * isOffRhythm 判斷「這一次請求在不在節奏上」。
+ */
+function robustDispersion(gaps: number[]): number {
+  const sorted = [...gaps].sort((a, b) => a - b);
+  const med = median(sorted);
+  if (med <= 0) return Number.POSITIVE_INFINITY;
+  const deviations = gaps.map((g) => Math.abs(g - med)).sort((a, b) => a - b);
+  return median(deviations) / med;
 }
 
 /** 一個 pattern 的節奏：以 anchorMs 為基準，每 gapMs 發生一次 */
