@@ -19,6 +19,7 @@
 export * from './session.js';
 export * from './primitives.js';
 export * from './workspace.js';
+export * from './sandboxed.js';
 
 // 型別轉出，讓 gui / cli 不需直接依賴 core-model
 export type {
@@ -43,7 +44,10 @@ export { isReadOnlyTool, READ_ONLY_CAPABILITIES, TOOL_LIMITS } from '@arc/core-m
 export {
   AGENT_DEFAULT_CAPABILITIES,
   matchDomain,
+  warmupSandbox,
+  DEFAULT_SANDBOX_LIMITS,
   type DeclarativeSpec,
   type DeclarativeStep,
   type ExecutionMode,
+  type SandboxLimits,
 } from '@arc/tool-runtime';

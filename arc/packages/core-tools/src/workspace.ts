@@ -8,6 +8,7 @@ import type { ToolDefinition, ToolResult } from '@arc/core-model';
 import { fail, ok } from '@arc/core-model';
 import { InvestigationSession, type SessionOptions } from './session.js';
 import { registerPrimitives } from './primitives.js';
+import { makeSandboxHandler, type SandboxedSpec } from './sandboxed.js';
 
 /**
  * Workspace —— Session 與 Registry 的組合
@@ -32,6 +33,9 @@ export class Workspace {
   /** 已註冊的宣告式工具規格。Tier 1 工具是純資料，可儲存與傳輸。 */
   private declarativeSpecs = new Map<string, DeclarativeSpec>();
 
+  /** 已註冊的沙箱工具規格。Tier 2 同樣是純資料，只是 body 為程式碼字串。 */
+  private sandboxedSpecs = new Map<string, SandboxedSpec>();
+
   constructor(opts: SessionOptions = {}) {
     this.session = new InvestigationSession(opts);
     registerPrimitives(this.registry, this.session);
@@ -55,6 +59,24 @@ export class Workspace {
     return this.declarativeSpecs.get(name);
   }
 
+  /**
+   * 註冊沙箱工具（Tier 2）。
+   *
+   * 用於宣告式表達不了的情境：條件判斷、迴圈、複雜狀態機。
+   *
+   * 安全性質與 Tier 1 一致 —— 沙箱內只看得到該工具
+   * 宣告過的 capabilities 所對應的函式。沒有 fetch、
+   * 沒有 require、沒有檔案系統，全域環境是空的。
+   */
+  registerSandboxed(def: ToolDefinition, spec: SandboxedSpec): void {
+    this.sandboxedSpecs.set(def.name, spec);
+    this.registry.upsert({ ...def, tier: 'sandboxed' }, makeSandboxHandler(spec));
+  }
+
+  getSandboxedSpec(name: string): SandboxedSpec | undefined {
+    return this.sandboxedSpecs.get(name);
+  }
+
   /** 呼叫工具。allowedCapabilities 由呼叫端決定（agent-facade 會更窄）。 */
   callTool(
     name: string,
@@ -76,18 +98,21 @@ export class Workspace {
    */
   exportTool(name: string): ToolResult<{
     def: ToolDefinition;
-    spec: DeclarativeSpec;
+    spec: DeclarativeSpec | SandboxedSpec;
   }> {
     const entry = this.registry.get(name);
     if (!entry) return fail('NOT_FOUND', `unknown tool: ${name}`);
-    const spec = this.declarativeSpecs.get(name);
-    if (!spec) {
-      return fail(
-        'INVALID_ARGUMENT',
-        `tool "${name}" is not declarative and cannot be exported as data`,
-      );
-    }
-    return ok({ def: entry.def, spec });
+
+    const declarative = this.declarativeSpecs.get(name);
+    if (declarative) return ok({ def: entry.def, spec: declarative });
+
+    const sandboxed = this.sandboxedSpecs.get(name);
+    if (sandboxed) return ok({ def: entry.def, spec: sandboxed });
+
+    return fail(
+      'INVALID_ARGUMENT',
+      `tool "${name}" is a builtin primitive; its behaviour lives in code, not data`,
+    );
   }
 
   async close(): Promise<void> {

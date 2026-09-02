@@ -176,6 +176,8 @@ export type ToolErrorCode =
   | 'PARSE_FAILED'
   | 'BROWSER_NOT_READY'
   | 'INVALID_ARGUMENT'
+  /** 沙箱資源超限（記憶體、堆疊、host 呼叫次數） */
+  | 'RESOURCE_EXCEEDED'
   | 'EXECUTION_FAILED';
 
 export function ok<T>(data: T, truncated?: Extract<ToolResult<T>, { ok: true }>['truncated']): ToolResult<T> {

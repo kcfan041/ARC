@@ -8,7 +8,8 @@
     "clock": "tsx src/run-clock-check.ts",
     "measure": "tsx src/run-measure.ts",
     "c9": "tsx src/run-c9-sweep.ts",
-    "tools": "tsx src/run-tools-check.ts"
+    "tools": "tsx src/run-tools-check.ts",
+    "sandbox": "tsx src/run-sandbox-check.ts"
   },
   "dependencies": {
     "@arc/browser-runtime": "*",

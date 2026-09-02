@@ -9,6 +9,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@arc/core-model": "*"
+    "@arc/core-model": "*",
+    "quickjs-emscripten": "^0.32.0"
   }
 }

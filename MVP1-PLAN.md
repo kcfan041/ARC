@@ -927,6 +927,60 @@ LLM 不需要知道某個工具是宣告式還是沙箱。
 
 isolated-vm 保留為日後的升級選項，介面設計成可抽換。
 
+#### 沙箱的實測性質（P2，2026-08-18）
+
+**全域環境**
+
+```text
+fetch / require / process / XMLHttpRequest / WebSocket / setTimeout
+  → 全部 undefined
+
+eval / Function
+  → 存在，但同樣受限於沙箱作用域，
+    無法藉此取得任何未注入的能力，因此不構成逃逸途徑
+```
+
+**資源限制**（四項皆實測可攔截）
+
+```text
+執行時間   setInterruptHandler 週期性檢查掛鐘時間
+           實測：500ms 上限，實際 501ms 中斷
+記憶體     setMemoryLimit，QuickJS 以 InternalError: out of memory 回報
+堆疊       setMaxStackSize
+host 呼叫  自行計數，防止工具在迴圈中無限呼叫注入的能力
+```
+
+**錯誤分類**
+
+新增 `RESOURCE_EXCEEDED` 錯誤碼。判別順序刻意設計 ——
+資源超限的訊號要優先於一般錯誤，否則呼叫端無法分辨
+「工具寫錯」與「資源不足」。
+
+```text
+RESOURCE_EXCEEDED   記憶體、堆疊、host 呼叫次數超限
+TIMEOUT             執行時間超限
+EXECUTION_FAILED    語法錯誤、工具主動拋出的例外
+```
+
+**生命週期**
+
+QuickJS 的 handle 釋放順序敏感，順序錯誤會導致 WASM 層崩潰：
+
+```text
+1. host function handle 在 setProp 後立刻 dispose
+   （setProp 會自行保留一份參照）
+2. context 先於 runtime dispose
+3. 兩者都包在 try/catch 內，避免錯誤狀態下的二次崩潰
+```
+
+每次執行建立新的 runtime，因此兩個工具不共用全域 ——
+已驗證前次執行的全域變數不會殘留，且前次崩潰後仍可正常執行。
+
+**參數注入**
+
+args 以 `JSON.stringify` 注入為變數，而非字串拼接。
+已驗證含引號與程式碼片段的參數不會被當成程式碼執行。
+
 ### 3A.6 Context 管理
 
 ```text
@@ -950,7 +1004,7 @@ isolated-vm 保留為日後的升級選項，介面設計成可抽換。
 | # | 內容 | 狀態 |
 |---|---|---|
 | **P1** | MCP schema 契約、Registry、capability 注入、Tier 1 | ✅ **已完成** |
-| P2 | QuickJS 沙箱、資源限制、中斷 | 待做 |
+| **P2** | QuickJS 沙箱、資源限制、中斷 | ✅ **已完成** |
 | P3 | MCP Server（stdio） | 待做 |
 | P4 | MCP Client、匯入匯出、信任鏈 | 待做 |
 | P5 | 作用域啟動、`find_tools`、分頁 | 部分（scope 已可用） |
@@ -968,6 +1022,27 @@ agent 收窄      LLM 預設不含 browser.eval，越權呼叫遭拒
 Tier 1          dry-run / probe / full 三段式正確
                 引用不存在的 flow 被機械拒絕
 作用域過濾      不相符網域的工具被排除於清單外
+S1 回歸         C/D @ 500ms，precision 100% / recall 87.5%（無退化）
+GUI             零回歸
+```
+
+**P2 驗收結果**（30/30 通過，`npm run sandbox:check`）：
+
+```text
+隔離性          fetch / require / process / XMLHttpRequest /
+                WebSocket / setTimeout 皆為 undefined
+                eval 存在但無法藉此取得未注入的能力
+capability 注入  沙箱內只看得到宣告過的能力
+                asyncify 使非同步函式表現為同步
+資源限制        時間、記憶體、堆疊、host 呼叫次數 四項皆可攔截
+錯誤分類        RESOURCE_EXCEEDED 與 EXECUTION_FAILED 可區分
+                host 函式的錯誤可被沙箱內 try/catch 攔截
+執行間隔離      全域變數不殘留；前次崩潰後仍可正常執行
+Tier 2 整合     可註冊、執行、取得真實 session 資料、匯出
+                agent 能力收窄對 Tier 2 一樣生效
+                參數以資料形式注入，不會被當成程式碼
+
+P1 回歸         30/30（無退化）
 S1 回歸         C/D @ 500ms，precision 100% / recall 87.5%（無退化）
 GUI             零回歸
 ```
