@@ -13,7 +13,8 @@
     "agent": "tsx src/run-agent-check.ts",
     "mcp": "tsx src/run-mcp-check.ts",
     "store": "tsx src/run-store-check.ts",
-    "import": "tsx src/run-import-check.ts"
+    "import": "tsx src/run-import-check.ts",
+    "discovery": "tsx src/run-discovery-check.ts"
   },
   "dependencies": {
     "@arc/browser-runtime": "*",

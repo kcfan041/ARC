@@ -1,5 +1,5 @@
 import type { Capability, ToolDefinition, ToolResult } from '@arc/core-model';
-import { AGENT_DEFAULT_CAPABILITIES } from '@arc/tool-runtime';
+import { AGENT_DEFAULT_CAPABILITIES, ALWAYS_VISIBLE } from '@arc/tool-runtime';
 import { redact, type Redaction } from './redact.js';
 import type {
   ChatMessage,
@@ -35,6 +35,7 @@ export interface ToolHost {
   listTools(opts: {
     allowedCapabilities?: ReadonlySet<Capability>;
     domain?: string;
+    limit?: number;
   }): ToolResult<ToolDefinition[]>;
   callTool(
     name: string,
@@ -52,6 +53,13 @@ export type FacadeOptions = {
   redactOutbound?: boolean;
   /** 只暴露符合此網域的工具，控制 context 大小 */
   domain?: string;
+  /**
+   * 一次最多把幾個工具的完整 schema 放進 context。
+   *
+   * 超過時只保留常駐核心工具，其餘由模型用 find_tools 自行檢索。
+   * 對應 MVP1-PLAN 3A.6：300 工具 × 200 tokens 會直接塞爆 context。
+   */
+  maxToolsInContext?: number;
 };
 
 export type AgentTurn = {
@@ -85,13 +93,19 @@ const SYSTEM_PROMPT = `你是 ARC 的分析助理。ARC 是一套網站調查工
    那是被移除的憑證或個資。不要嘗試猜測其內容，
    必要時告訴使用者哪一項需要人工查看。
 
-4. 回答要簡短具體。使用者多半在追查某個特定行為。`;
+4. 回答要簡短具體。使用者多半在追查某個特定行為。
+
+5. 你看到的工具清單可能只是全部工具的一部分。
+   若需要的操作不在清單中，用 find_tools 以自然語言描述用途，
+   例如「抓取分頁資料」或「找出影片網址」。
+   取得工具名稱後即可直接呼叫。`;
 
 export class AgentFacade {
   private readonly allowed: ReadonlySet<Capability>;
   private readonly maxRounds: number;
   private readonly shouldRedact: boolean;
   private readonly domain?: string;
+  private readonly maxInContext: number;
 
   constructor(
     private readonly host: ToolHost,
@@ -101,13 +115,45 @@ export class AgentFacade {
     this.allowed = opts.allowedCapabilities ?? AGENT_DEFAULT_CAPABILITIES;
     this.maxRounds = opts.maxToolRounds ?? 8;
     this.shouldRedact = opts.redactOutbound ?? true;
+    this.maxInContext = opts.maxToolsInContext ?? 40;
     if (opts.domain) this.domain = opts.domain;
   }
 
-  /** LLM 可見的工具清單。已套用能力收窄與作用域過濾。 */
+  /**
+   * LLM 可見的工具清單。
+   *
+   * 已套用三層過濾：
+   *   1. 能力收窄   超出 allowedCapabilities 的工具不出現
+   *   2. 作用域     只保留與當前網域相符的工具
+   *   3. 分層揭露   工具數超過上限時，只保留常駐核心，
+   *                 其餘交由模型用 find_tools 自行檢索
+   */
   availableTools(): ToolDefinition[] {
+    const all = this.allTools();
+    if (all.length <= this.maxInContext) return all;
+
+    // 超量時只保留常駐核心。find_tools 本身也在常駐清單中，
+    // 因此模型仍有辦法找到被隱藏的工具。
+    return all.filter((t) => ALWAYS_VISIBLE.has(t.name));
+  }
+
+  /** 目前被隱藏、需經 find_tools 才能取得的工具數量 */
+  hiddenToolCount(): number {
+    return Math.max(0, this.allTools().length - this.availableTools().length);
+  }
+
+  /**
+   * 取得完整的工具清單。
+   *
+   * 必須明確指定 limit —— registry 預設只回傳 100 筆，
+   * 而分層揭露的判斷需要知道「總共有幾個」。
+   * 若沿用預設值，超過 100 個工具時會誤判為未超量，
+   * 且常駐核心工具可能因字母序而落在第一頁之外。
+   */
+  private allTools(): ToolDefinition[] {
     const res = this.host.listTools({
       allowedCapabilities: this.allowed,
+      limit: 10_000,
       ...(this.domain ? { domain: this.domain } : {}),
     });
     return res.ok ? res.data : [];

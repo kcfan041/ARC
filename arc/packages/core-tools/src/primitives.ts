@@ -1,6 +1,11 @@
 import type { ToolDefinition } from '@arc/core-model';
-import { fail, ok, TOOL_LIMITS } from '@arc/core-model';
-import { ToolRegistry, type ToolHandler } from '@arc/tool-runtime';
+import { fail, ok, READ_ONLY_CAPABILITIES, TOOL_LIMITS } from '@arc/core-model';
+import {
+  ToolRegistry,
+  searchTools,
+  summarise,
+  type ToolHandler,
+} from '@arc/tool-runtime';
 import type { InvestigationSession } from './session.js';
 
 /**
@@ -231,6 +236,45 @@ export function registerPrimitives(
         }
         await session.goto(String(args.url));
         return ok({ url: args.url });
+      },
+    ],
+
+    [
+      builtin({
+        name: 'find_tools',
+        title: '尋找工具',
+        description:
+          '依用途搜尋可用的工具。當你需要的操作不在目前可見的工具清單中時，' +
+          '用自然語言描述你想做什麼，例如「抓取分頁資料」或「找出影片網址」。' +
+          '回傳的是工具摘要；取得名稱後即可直接呼叫該工具。',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            intent: {
+              type: 'string',
+              description: '想完成的事，用自然語言描述',
+            },
+            limit: { type: 'number', description: '回傳筆數上限', default: 10 },
+          },
+          required: ['intent'],
+        },
+        capabilities: ['session.read'],
+        annotations: { readOnlyHint: true, idempotentHint: true },
+      }),
+      (args) => {
+        const listed = registry.list({ limit: 10_000 });
+        if (!listed.ok) return listed;
+
+        const hits = searchTools(listed.data, String(args.intent ?? ''), {
+          limit: Number(args.limit) || 10,
+        });
+
+        return ok(
+          hits.map((h) => ({
+            ...summarise(h.def, READ_ONLY_CAPABILITIES),
+            score: h.score,
+          })),
+        );
       },
     ],
   ];

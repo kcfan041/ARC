@@ -40,6 +40,7 @@ export interface McpHost {
   listTools(opts: {
     allowedCapabilities?: ReadonlySet<Capability>;
     domain?: string;
+    limit?: number;
   }): { ok: true; data: ToolDefinition[] } | { ok: false; error: unknown };
   callTool(
     name: string,
@@ -74,7 +75,9 @@ export function createArcMcpServer(
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    const res = host.listTools({ allowedCapabilities: allowed });
+    // 必須明確指定 limit —— registry 預設只回傳 100 筆，
+    // 而 MCP client 期待 tools/list 給出完整清單。
+    const res = host.listTools({ allowedCapabilities: allowed, limit: 10_000 });
     const defs = res.ok ? res.data : [];
 
     return {
