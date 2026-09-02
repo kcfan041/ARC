@@ -7,11 +7,13 @@
     "start": "tsx src/fixture/server.ts",
     "clock": "tsx src/run-clock-check.ts",
     "measure": "tsx src/run-measure.ts",
-    "c9": "tsx src/run-c9-sweep.ts"
+    "c9": "tsx src/run-c9-sweep.ts",
+    "tools": "tsx src/run-tools-check.ts"
   },
   "dependencies": {
     "@arc/browser-runtime": "*",
     "@arc/core-model": "*",
-    "@arc/correlator": "*"
+    "@arc/correlator": "*",
+    "@arc/tool-runtime": "*"
   }
 }

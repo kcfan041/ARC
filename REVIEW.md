@@ -45,8 +45,10 @@
         決定 MVP 範圍，這是後續所有決策的前提
 
 第 2 步：解決 C3 + T1
-        定義 Core Tool 簽章時，Artifact/Position 模型必須同時定案
-        因為所有 AST 類工具的回傳值都要帶座標資訊
+        ✅ C3 已於 2026-08-18 解除（MCP Tool 格式 + capabilities）
+        T1 仍待處理。原本的理由是「定義簽章時 Artifact/Position
+        模型必須同時定案」，但實際實作發現兩者可解耦 ——
+        座標型別可作為後續新增的 schema，不阻礙工具契約成立。
 
 第 3 步：解決 T3
         統一 state model，產出 SQLite schema
@@ -80,7 +82,7 @@
 | **S4** | Minor | §41 與 §57 內容重複；Human-first 原則三處重述 | L1975, L2787 |
 | **C1** | Major | §29.1 Core Tools 清單缺 21 個內文已定義的工具 | L1518-1611 |
 | **C2** | Minor | 工具命名慣例不統一（前綴有無、domain 歸屬混亂） | 全文 |
-| **C3** | **Blocker** | 工具無參數型別、回傳結構、錯誤模型、分頁策略 | 全文 |
+| **C3** | ~~Blocker~~ **已解除** | 工具無參數型別、回傳結構、錯誤模型、分頁策略 → 已採用 MCP Tool 格式實作，另加 capabilities 強制機制。見 3.3 末 | 全文 |
 | **C4** | Major | ID 命名空間未定義；module id 跨 build 穩定性未答 | 全文 |
 | **T1** | **Blocker** | Position Mapping 缺失，§56 無實作方案 | §56 (L2698) |
 | **T2** | Major | 簡化 pipeline 破壞 evidence 可驗證性，牴觸 §42 原則 10 | §8, §24 |
@@ -375,6 +377,53 @@ type ToolErrorCode =
 超限行為            回傳 truncated 而非拋錯
 大型內容            回傳 artifact_id，由 read_artifact 分段取得
 ```
+
+---
+
+> **【已解除 2026-08-18：C3 Blocker】**
+>
+> 採用 **MCP（Model Context Protocol）** 的 Tool 格式作為簽章契約，
+> 實作於 `packages/core-model/src/tool.ts` 與 `packages/tool-runtime/`。
+>
+> **已實作的項目**：
+>
+> ```text
+> ✓ 參數型別        inputSchema（JSON Schema）
+> ✓ 回傳結構        outputSchema
+> ✓ 錯誤模型        ToolErrorCode 列舉，非自由字串
+> ✓ 統一信封        ToolResult<T> = { ok, data, truncated } | { ok, error }
+> ✓ 分頁機制        truncated.cursor
+> ✓ 全域預設        TOOL_LIMITS（256KB / 100 筆 / 30s）
+> ✓ 逾時保護        Registry.call 強制套用
+> ```
+>
+> **超出本節原建議的部分** —— 新增了 `capabilities` 機制：
+>
+> 本節原本只要求「工具要有簽章」。但在工具可由 AI 生成或外部匯入的
+> 前提下，簽章不足以構成安全性。MCP 規格明文要求
+> `annotations`（readOnlyHint 等）**必須視為不可信**，
+> 因為那是工具的自述。
+>
+> 因此另立一套強制機制：
+>
+> ```text
+> annotations    工具自述 → 不可信 → 僅供 UI 與 LLM 參考
+> capabilities   宣告 + 執行期注入 → 強制 → 決定實際拿得到什麼
+> ```
+>
+> 未宣告的能力不是「被禁止」，而是**不存在於作用域**。
+> 已於 QuickJS 實測驗證：
+>
+> ```text
+> network_list  → "function"    已宣告
+> browser_eval  → "undefined"   未宣告，不存在
+> ```
+>
+> 這符合 `MVP1-PLAN.md` 3.8 的上界原則 ——
+> 最小權限是機制，不是行為黑名單。core-tools 本身仍零限制。
+>
+> **驗收**：`npm run tools:check` 共 30 項，全數通過。
+> 設計說明見 `MVP1-PLAN.md` 第 3A 章。
 
 ---
 

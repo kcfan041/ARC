@@ -782,6 +782,208 @@ core-tools 不得包含任何政策判定。
 不影響「工具能做什麼」。
 
 此假設需由 SPIKES.md 的 S2 實際驗證。
+
+---
+
+## 3A. 工具框架（2026-08-18 新增）
+
+### 3A.0 動機
+
+原本的設計把「採集規格」當成一個特例：LLM 產生規格，
+facade 驗證後執行。但實際上這個模式可以推廣 ——
+
+> 工具可以是內建的、AI 寫的、或匯入的。
+> 平台可能有幾百種工具，其中部分針對特定網站或情境。
+> LLM 需要清楚知道每個工具怎麼呼叫，而不是寫死。
+
+這個推廣同時解決了 S2 的風險。原本 S2 若覆蓋率不足，
+只能在「宣告式規格」與「原始腳本」之間二選一。
+工具系統提供第三條路：
+
+```text
+針對某個網站寫一個工具 → 審查一次 → 重複使用無數次
+
+複雜度被封裝進工具，審查成本被攤提。
+從「每次採集都要通過安全檢查」
+變成「每個工具審查一次，之後只是呼叫」
+```
+
+### 3A.1 採用 MCP 作為工具契約
+
+選擇 Model Context Protocol 的理由：
+
+```text
+對內   ARC 把 core-tools 以 MCP 暴露
+       → Claude Desktop / IDE 可以直接驅動 ARC
+對外   ARC 作為 MCP client 消費外部 server
+       → 「匯入工具」的故事免費得到
+對齊   LLM 已熟悉 MCP 的工具描述格式
+       → 不需要教模型一套自創 schema
+```
+
+MCP 的 Tool 欄位（name / title / description / inputSchema /
+outputSchema / annotations / \_meta）直接對應 REVIEW.md C3
+要求的簽章規範。ARC 專屬欄位放進 `_meta`，不破壞協定相容性。
+
+### 3A.2 ★ 兩套機制必須嚴格分離
+
+**這是整個框架的安全基礎。**
+
+MCP 規格明文要求：
+
+> clients **MUST** consider tool annotations to be untrusted
+> unless they come from trusted servers.
+
+因此 `readOnlyHint`、`destructiveHint` 這些欄位是**給人與模型看的
+提示**，不是安全依據。對「AI 寫的工具 + 匯入的工具」而言這點致命 ——
+一個工具大可宣稱自己 `readOnlyHint: true` 然後做任何事。
+
+| | 來源 | 性質 | 用途 |
+|---|---|---|---|
+| MCP `annotations` | 工具自述 | **不可信提示** | UI 顯示、LLM 理解 |
+| ARC `capabilities` | 宣告 + **執行期注入** | **強制機制** | 決定實際拿得到什麼 |
+
+工具宣告 `capabilities: ['network.replay']`，runtime 就只注入那一個。
+它拿不到 `browser_eval` —— 不是因為被禁止，而是**那個函式根本不在
+它的作用域裡**。
+
+**實測驗證**（QuickJS 沙箱，2026-08-18）：
+
+```text
+network_list           → "function"     已宣告，注入
+browser_eval           → "undefined"    未宣告，不存在
+fetch / require / process → "undefined"
+無窮迴圈中斷           → ✓ 可終止
+```
+
+這符合 3.8 的上界原則：
+
+```text
+政策  「不准抓影音網站」                     ← 不做
+機制  「宣告 A 就只給 A」（最小權限）         ← 這是機制
+```
+
+core-tools 本身仍然零限制，人工呼叫路徑完全不變。
+
+### 3A.3 職責切分：Session 與 Registry 並存
+
+```text
+Session    資源生命週期（瀏覽器、訂閱、計時器）+ 事件串流
+Registry   工具的宣告、發現、呼叫、capability 注入
+Workspace  兩者的組合，多數呼叫端用這個
+```
+
+**Session 不是過渡層，是永久的資源持有者。** 兩個理由：
+
+```text
+1. 狀態歸屬
+   rec / listeners / seenActions / poll 這些是跨工具共享的資源，
+   不屬於任何單一工具。若強行併入 Registry，
+   等於重新發明一個 context 概念。
+
+2. MCP 沒有串流
+   MCP 是請求／回應模型，沒有對應「事件串流」。
+   而 action 與 flow 即時推送到 GUI 正是 ARC 的核心價值。
+   這條路徑必然存在於 Registry 之外。
+```
+
+因此兩者並存是刻意分層，不是技術債。
+
+### 3A.4 三層執行，單一介面
+
+```text
+                    Tool Registry
+              （統一 MCP Tool schema）
+                          │
+        ┌─────────────────┼─────────────────┐
+        ▼                 ▼                 ▼
+   Tier 1 宣告式      Tier 2 沙箱        Tier 3 外部
+                                          MCP Server
+   無程式碼執行      QuickJS + 能力注入   程序隔離
+   零風險            AI 寫的工具          第三方
+```
+
+**關鍵：三層對 LLM 呈現完全相同的介面。**
+LLM 不需要知道某個工具是宣告式還是沙箱。
+
+這也讓 3.4 的「採集規格」不再是特例 —— 它就是 Tier 1 的一種工具。
+**是整併，不是新增。**
+
+### 3A.5 沙箱選型：QuickJS
+
+| 方案 | 隔離強度 | 安裝風險 |
+|---|---|---|
+| `node:vm` | ✗ 官方明言非安全邊界 | — |
+| `isolated-vm` | 強（真 V8 isolate） | **需 node-gyp 編譯** |
+| **`quickjs-emscripten`** | 強（WASM 隔離） | **純 WASM，無編譯** |
+
+選 QuickJS 的決定性理由是實測發現的：
+**這個環境本身就在擋 install scripts**（esbuild、fsevents 皆被擋），
+`isolated-vm` 需要編譯，在使用者機器上失敗率不低。
+而工具主要做編排不做重運算，效能差距無感。
+
+**附帶發現**：asyncify 變體讓注入的非同步函式在沙箱內表現為同步。
+工具作者（尤其 AI）不需處理 `async/await`，可顯著降低生成錯誤率。
+
+isolated-vm 保留為日後的升級選項，介面設計成可抽換。
+
+### 3A.6 Context 管理
+
+```text
+300 工具 × 每個 schema 約 200 tokens = 60,000 tokens
+→ 還沒開始工作，context 就滿了
+→ 直接違反原規格書 §37
+```
+
+三段式解法：
+
+```text
+1. 作用域啟動   _meta.applies_to = { domain: "*.gamer.com.tw" }
+                只有情境相符的工具進 context
+2. 分層揭露     常駐：~20 個核心原語
+                按需：find_tools(intent) 檢索
+3. MCP 分頁     tools/list 原生支援 cursor
+```
+
+### 3A.7 分階段
+
+| # | 內容 | 狀態 |
+|---|---|---|
+| **P1** | MCP schema 契約、Registry、capability 注入、Tier 1 | ✅ **已完成** |
+| P2 | QuickJS 沙箱、資源限制、中斷 | 待做 |
+| P3 | MCP Server（stdio） | 待做 |
+| P4 | MCP Client、匯入匯出、信任鏈 | 待做 |
+| P5 | 作用域啟動、`find_tools`、分頁 | 部分（scope 已可用） |
+| P6 | GUI 工具面板 | 待做 |
+| P7 | S2 合併：用 Tier 1 驗證覆蓋率 | 待做 |
+
+**P1 驗收結果**（30/30 通過）：
+
+```text
+工具簽章        6 個原語，皆有 description / inputSchema / capabilities
+                → REVIEW.md C3（Blocker）解除
+capability 注入  未宣告的能力不存在於作用域（4 項驗證）
+                annotations 謊稱唯讀時，capabilities 仍正確判定
+agent 收窄      LLM 預設不含 browser.eval，越權呼叫遭拒
+Tier 1          dry-run / probe / full 三段式正確
+                引用不存在的 flow 被機械拒絕
+作用域過濾      不相符網域的工具被排除於清單外
+S1 回歸         C/D @ 500ms，precision 100% / recall 87.5%（無退化）
+GUI             零回歸
+```
+
+### 3A.8 信任模型（P4 設計）
+
+```text
+匯入時   顯示該工具宣告了哪些能力 → 人工確認一次
+之後     呼叫不再詢問
+記錄     來源、是人寫還是 AI 生成、宣告的能力、是否已審
+
+唯讀工具（capabilities 全在 READ_ONLY_CAPABILITIES 內）
+可考慮免確認 —— 這個判定依 capabilities 而非 annotations，
+因此可信。
+```
+
 ---
 
 ## 4. 與原規格書的差異對照

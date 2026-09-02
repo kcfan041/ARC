@@ -11,6 +11,9 @@
       "path": "packages/correlator"
     },
     {
+      "path": "packages/tool-runtime"
+    },
+    {
       "path": "packages/core-tools"
     },
     {

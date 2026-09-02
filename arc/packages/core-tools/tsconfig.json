@@ -4,10 +4,21 @@
     "rootDir": "./src",
     "outDir": "./dist"
   },
-  "include": ["src/**/*"],
+  "include": [
+    "src/**/*"
+  ],
   "references": [
-    { "path": "../core-model" },
-    { "path": "../browser-runtime" },
-    { "path": "../correlator" }
+    {
+      "path": "../core-model"
+    },
+    {
+      "path": "../browser-runtime"
+    },
+    {
+      "path": "../correlator"
+    },
+    {
+      "path": "../tool-runtime"
+    }
   ]
 }

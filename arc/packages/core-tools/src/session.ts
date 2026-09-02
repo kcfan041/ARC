@@ -144,6 +144,49 @@ export class InvestigationSession {
     await this.rec.page.goto(url, { waitUntil: 'domcontentloaded' });
   }
 
+  /**
+   * 在網站自己的 context 中重放一個已觀測的請求。
+   *
+   * 對應原規格書 §21 Level 2（Browser Context Testing），
+   * 也是 MVP1-PLAN.md 1.5 決定的主要產出形式：
+   *   讓網站自己處理 cookie、signature、token、指紋，
+   *   使用者不需要理解那些機制如何運作。
+   *
+   * 安全性質（MVP1-PLAN.md 3.4）：
+   *   method 與 origin 一律沿用原始 request，呼叫端無權指定。
+   *   只有 changes 中列出的 query 參數會被改變。
+   *   因此在結構上無法呼叫「網站自己沒有呼叫過」的端點。
+   */
+  async replay(
+    flowId: string,
+    changes: Record<string, unknown> = {},
+  ): Promise<{ status: number; body: unknown }> {
+    if (!this.rec) throw new Error('session not started');
+    const flow = this.rec.flows.find((f) => f.id === flowId);
+    if (!flow) throw new Error(`no such flow: ${flowId}`);
+
+    // 只改變 query 參數，其餘沿用原始請求
+    const target = new URL(flow.url);
+    for (const [k, v] of Object.entries(changes)) {
+      target.searchParams.set(k, String(v));
+    }
+
+    return this.rec.page.evaluate(
+      async ({ url, method }) => {
+        const r = await fetch(url, { method, credentials: 'include' });
+        const text = await r.text();
+        let parsed: unknown = text;
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          /* 非 JSON 則保留原文 */
+        }
+        return { status: r.status, body: parsed };
+      },
+      { url: target.toString(), method: flow.method },
+    );
+  }
+
   async stop(): Promise<void> {
     if (this.poll) clearInterval(this.poll);
     this.poll = undefined;

@@ -35,7 +35,7 @@ module.exports = {
       comment: 'agent 不得直接觸及任何內層套件',
       from: { path: '^packages/agent/' },
       to: {
-        path: '^packages/(browser-runtime|static-analyzer|correlator|core-store)/',
+        path: '^packages/(browser-runtime|static-analyzer|correlator|core-store|tool-runtime)/',
       },
     },
 
@@ -49,6 +49,20 @@ module.exports = {
       from: { path: '^packages/(gui|cli)/' },
       to: {
         path: '^packages/(browser-runtime|static-analyzer|correlator|core-store)/',
+      },
+    },
+
+    // ── 工具框架的邊界 ────────────────────────────────────────
+    {
+      name: 'tool-runtime-stays-pure',
+      severity: 'error',
+      comment:
+        'tool-runtime 只負責註冊、能力注入與宣告式執行，' +
+        '不得依賴任何具體能力來源。能力由呼叫端以 provide() 注入，' +
+        '這是「未宣告的能力不存在」得以成立的前提。',
+      from: { path: '^packages/tool-runtime/' },
+      to: {
+        path: '^packages/(?!core-model|tool-runtime)',
       },
     },
 

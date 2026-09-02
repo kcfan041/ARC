@@ -16,7 +16,8 @@
     "s1:c9": "npm run c9 --workspace @arc/spike-s1",
     "gui": "tsx packages/gui-server/src/run.ts",
     "gui:build": "npm run build --workspace @arc/gui",
-    "gui:dev": "npm run dev --workspace @arc/gui"
+    "gui:dev": "npm run dev --workspace @arc/gui",
+    "tools:check": "npm run tools --workspace @arc/spike-s1"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
