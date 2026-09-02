@@ -9,12 +9,18 @@
     "measure": "tsx src/run-measure.ts",
     "c9": "tsx src/run-c9-sweep.ts",
     "tools": "tsx src/run-tools-check.ts",
-    "sandbox": "tsx src/run-sandbox-check.ts"
+    "sandbox": "tsx src/run-sandbox-check.ts",
+    "agent": "tsx src/run-agent-check.ts",
+    "mcp": "tsx src/run-mcp-check.ts",
+    "store": "tsx src/run-store-check.ts"
   },
   "dependencies": {
     "@arc/browser-runtime": "*",
     "@arc/core-model": "*",
     "@arc/correlator": "*",
-    "@arc/tool-runtime": "*"
+    "@arc/tool-runtime": "*",
+    "@arc/agent-facade": "*",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@arc/core-store": "*"
   }
 }

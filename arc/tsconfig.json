@@ -5,6 +5,9 @@
       "path": "packages/core-model"
     },
     {
+      "path": "packages/core-store"
+    },
+    {
       "path": "packages/browser-runtime"
     },
     {
@@ -15,6 +18,12 @@
     },
     {
       "path": "packages/core-tools"
+    },
+    {
+      "path": "packages/agent-facade"
+    },
+    {
+      "path": "packages/mcp-server"
     },
     {
       "path": "packages/gui-server"

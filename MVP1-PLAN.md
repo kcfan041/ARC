@@ -1005,7 +1005,9 @@ args 以 `JSON.stringify` 注入為變數，而非字串拼接。
 |---|---|---|
 | **P1** | MCP schema 契約、Registry、capability 注入、Tier 1 | ✅ **已完成** |
 | **P2** | QuickJS 沙箱、資源限制、中斷 | ✅ **已完成** |
-| P3 | MCP Server（stdio） | 待做 |
+| **P2.5** | agent-facade、LLM Provider 抽象、敏感資料遮蔽 | ✅ **已完成** |
+| **P3** | MCP Server（stdio） | ✅ **已完成** |
+| **P3.5** | core-store 持久化（解 REVIEW T4） | ✅ **已完成** |
 | P4 | MCP Client、匯入匯出、信任鏈 | 待做 |
 | P5 | 作用域啟動、`find_tools`、分頁 | 部分（scope 已可用） |
 | P6 | GUI 工具面板 | 待做 |
@@ -1045,6 +1047,49 @@ Tier 2 整合     可註冊、執行、取得真實 session 資料、匯出
 P1 回歸         30/30（無退化）
 S1 回歸         C/D @ 500ms，precision 100% / recall 87.5%（無退化）
 GUI             零回歸
+```
+
+**P2.5 驗收結果**（20/20 通過，`npm run agent:check`，含真實模型）：
+
+```text
+遮蔽            Authorization / Cookie / JWT / email / 信用卡號（Luhn）
+                非敏感欄位保留；一般長數字不誤判
+                相同的值使用同一個標記；記錄簿可還原原值
+能力收窄        LLM 看不到也呼叫不到需要 browser.eval 的工具
+真實 tool call  模型從 schema 正確推導參數並完成多輪往返
+跨層提問        模型自行使用 action_get_effects 並引用 action/flow 識別碼
+```
+
+實測中模型主動區分了「統計綁定」與「因果證據」的可信度差異 ——
+它指出 D-rhythm 是策略判定而非直接因果，並改以 initiator stack
+作為佐證。這代表 P1 定的工具 schema 對模型是可讀的。
+
+**P3 驗收結果**（17/17 通過，`npm run mcp:check`）：
+
+```text
+以真正的 MCP client 透過 stdio 連線驗證，而非直接呼叫函式。
+
+協定           握手、tools/list、tools/call 皆正常
+ARC 專屬欄位    放在 _meta，不破壞協定相容性
+能力收窄        外部 client 看不到任何需要 browser.eval 的工具
+session 附著    首次呼叫工具時自動附著瀏覽器
+錯誤            以 isError 回報並帶錯誤碼
+遮蔽            送回 client 的內容同樣經過遮蔽
+```
+
+**P3.5 驗收結果**（32/32 通過，`npm run store:check`）：
+
+```text
+★ 工具在重啟後自動載回，且可實際執行
+★ 觀測記錄（action / flow / binding）在重啟後仍在
+★ 工具內容改變後，先前的核准自動失效
+
+schema          tool / tool_approval / investigation / session /
+                action / flow / binding / artifact / note
+儲存分工        DB 存 metadata 與參照，大型內容進 objects/
+                content-addressed，相同內容天然去重
+綁定            記錄產生它的策略與時間窗，日後可重新計算
+未設專案目錄     仍可正常運作，工具僅存在於記憶體
 ```
 
 ### 3A.8 信任模型（P4 設計）

@@ -87,7 +87,7 @@
 | **T1** | **Blocker** | Position Mapping 缺失，§56 無實作方案 | §56 (L2698) |
 | **T2** | Major | 簡化 pipeline 破壞 evidence 可驗證性，牴觸 §42 原則 10 | §8, §24 |
 | **T3** | **Blocker** | 四套 state model 未統一 | §5.4/23/24/25 |
-| **T4** | Major | §35 有儲存項目清單但無 schema、無實體關係 | L1785-1815 |
+| **T4** | ~~Major~~ **已解除** | §35 有儲存項目清單但無 schema → 已實作 core-store（node:sqlite）。見 4.4 末 | L1785-1815 |
 | **T5** | Major | §34 選型未決，且未評估跨語言 AST 序列化風險 | L1748-1783 |
 | **L1** | **Blocker** | §30 與 §43 對第一版定義矛盾；§30 違反 §42 原則 12 | L1615, L2038 |
 | **L2** | Major | `browser_eval` 風險高於 replay，卻未納入 §40 保護範圍 | §21, §40 |
@@ -96,7 +96,7 @@
 | **M2** | Major | 缺測試策略（尤其 deobfuscator 語意等價驗證） | — |
 | **M3** | Major | 缺非功能需求（效能、容量、截斷策略） | — |
 | **M4** | Minor | 缺專案結構與模組邊界定義 | — |
-| **M5** | Minor | 缺 LLM Provider 抽象層設計 | — |
+| **M5** | ~~Minor~~ **已解除** | 缺 LLM Provider 抽象層設計 → 已實作 agent-facade，含敏感資料遮蔽。見 6.5 末 | — |
 | **M6** | Minor | 缺 License 相容性檢查（§44 建議整合 webcrack） | L2148 |
 | **M7** | Major | §40 只有原則性文字，缺技術強制手段 ※**本項建議已被推翻，見 6.7 末的修訂註記** | L1934-1971 |
 
@@ -805,6 +805,61 @@ CREATE INDEX idx_edge_dst ON edge(dst_node, type);
 
 ---
 
+> **【已解除 2026-08-18：T4】**
+>
+> 實作於 `packages/core-store/`，使用 Node 內建的 `node:sqlite`
+> （零外部依賴、不需編譯 —— 與選 QuickJS 同樣的理由：
+> 本專案環境會擋 install scripts）。
+>
+> **已建立的資料表**
+>
+> ```text
+> tool / tool_approval          工具與信任記錄
+> investigation / session       調查與工作階段
+> action / flow / binding       觀測記錄
+> artifact                      content-addressed 檔案索引
+> note                          註記與書籤
+> ```
+>
+> **本節指出的四個缺口，實際採用的處置**
+>
+> ```text
+> 1. Graph 如何表示
+>    MVP1 尚未實作 §25 的 Dependency Graph，
+>    因此暫不建 node/edge 表。binding 表已能表達
+>    action ↔ flow 的關聯，那是目前唯一實際存在的邊。
+>
+> 2. Response body 存哪裡
+>    不進 DB。以 content-addressed 檔案存於 objects/，
+>    DB 只保留 hash 參照。相同內容天然去重。
+>
+> 3. 多 session 的資料歸屬
+>    artifact 表獨立於 session，跨 session 共用。
+>    action / flow / binding 以 session_id 為複合主鍵的一部分。
+>
+> 4. 是否需要 Neo4j
+>    仍未需要。目前的查詢都是單跳（action → flow），
+>    SQLite 的索引已足夠。§56 的九跳查詢要等 Graph 實作後才需重新評估。
+> ```
+>
+> **本節未預見、但實作時發現需要的**
+>
+> ```text
+> 信任綁定到 spec 雜湊而非工具名稱
+>   工具內容改變後，先前的核准必須自動失效，
+>   否則「核准過的工具」會變成可被竄改的後門。
+>
+> 綁定記錄產生它的策略與時間窗
+>   綁定是策略的產物而非觀測事實。
+>   策略日後改變時，可用原始的 action/flow 重新計算。
+> ```
+>
+> **驗收**：`npm run store:check` 共 32 項，全數通過。
+> 核心驗證是「關掉再開，工具與觀測記錄仍在，且工具可實際執行」——
+> 那正是 `MVP1-PLAN.md` 2.6 指出的、DevTools 結構上缺少的能力。
+
+---
+
 ### 4.5 T5：§34 選型未決，且未評估關鍵風險
 
 **位置**：L1748-1783
@@ -1212,6 +1267,69 @@ packages/
 **最後一項值得特別注意**：本工具的分析對象包含 cookies、Authorization header、response body 中的個資。若這些內容被原樣送往第三方 LLM API，會構成資料外洩風險。這與 §40 的安全章節有關，但 §40 完全沒提到這個面向。
 
 **建議**：新增 LLM Provider 抽象層設計，並定義**送出前的敏感資料遮蔽規則**（至少對 Authorization / Cookie / Set-Cookie header 預設遮蔽）。
+
+---
+
+> **【已解除 2026-08-18：M5】**
+>
+> 實作於 `packages/agent-facade/`。
+>
+> **本節列出的問題，實際處置**
+>
+> ```text
+> 支援哪些 provider    Anthropic + OpenAI 兩種格式。
+>                      兩者的 tool calling 結構不同，差異收在抽象層。
+>                      本地模型（Ollama / vLLM）多為 OpenAI 相容，
+>                      因此走同一條路徑。
+>
+> API key 管理         一律從環境變數取得，不寫進任何專案檔案。
+>                      ARC_LLM_KIND / ARC_LLM_MODEL / ARC_LLM_BASE_URL
+>                      OPENAI_API_KEY / ANTHROPIC_API_KEY
+>
+> Tool calling 差異    OpenAI    tools[].function + message.tool_calls[]
+>                      Anthropic tools[].input_schema + content[] 的 tool_use
+>
+> 逾時                 每次請求可設定，預設 120 秒
+>
+> 敏感資料遮蔽         見下
+> ```
+>
+> **仍未處理**
+>
+> ```text
+> 成本控制：單次 investigation 的 token 上限
+>   目前只有「工具呼叫輪次上限」（預設 8 輪），
+>   沒有 token 層級的預算控制。
+>
+> 本地模型可行性
+>   介面已相容，但小模型能否勝任工具選擇尚未實測。
+> ```
+>
+> **遮蔽層（本節指出的「最後一項」）**
+>
+> 這是整個 LLM 層唯一不可繞過的環節 —— 所有送往 provider
+> 的內容都必須先經過 `redact()`。兩條路徑皆然：
+>
+> ```text
+> 內部  GUI 側邊欄     → agent-facade → 遮蔽 → provider
+> 外部  Claude Desktop → MCP Server  → 遮蔽 → client
+> ```
+>
+> 規則超出本節的最低建議：
+>
+> ```text
+> 固定欄位  Authorization / Cookie / Set-Cookie / X-Api-Key 等
+> 鍵名判斷  token / secret / password / apikey / jwt 等欄位名
+> 啟發式    JWT（三段 base64）、Bearer 值、長 base64、
+>           email、信用卡號（經 Luhn 驗證以降低誤判）
+> ```
+>
+> **設計取捨**：遮蔽處留下 `[已遮蔽:type#id]` 標記，
+> 原值留在宿主端的記錄簿中，使用者可點開查看並自行決定是否附上。
+> 誤判的代價因此從「資料遺失」降為「多按一次」。
+>
+> **驗收**：`npm run agent:check` 共 20 項，含真實模型的
+> tool calling 往返，全數通過。
 
 ---
 

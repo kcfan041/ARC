@@ -6,6 +6,7 @@ import {
 } from '@arc/tool-runtime';
 import type { ToolDefinition, ToolResult } from '@arc/core-model';
 import { fail, ok } from '@arc/core-model';
+import { ProjectStore } from '@arc/core-store';
 import { InvestigationSession, type SessionOptions } from './session.js';
 import { registerPrimitives } from './primitives.js';
 import { makeSandboxHandler, type SandboxedSpec } from './sandboxed.js';
@@ -26,9 +27,21 @@ import { makeSandboxHandler, type SandboxedSpec } from './sandboxed.js';
  *   需要串流        → 直接用 session.on()
  *   需要呼叫工具    → 用 registry / callTool()
  */
+export type WorkspaceOptions = SessionOptions & {
+  /**
+   * 專案目錄。給定時，工具會持久化，且開啟時自動載回。
+   *
+   * 不給則工具只存在於記憶體 —— 適用於測試與臨時分析。
+   */
+  projectDir?: string;
+};
+
 export class Workspace {
   readonly session: InvestigationSession;
   readonly registry = new ToolRegistry();
+
+  /** 專案儲存。未指定 projectDir 時為 undefined。 */
+  readonly store?: ProjectStore;
 
   /** 已註冊的宣告式工具規格。Tier 1 工具是純資料，可儲存與傳輸。 */
   private declarativeSpecs = new Map<string, DeclarativeSpec>();
@@ -36,9 +49,32 @@ export class Workspace {
   /** 已註冊的沙箱工具規格。Tier 2 同樣是純資料，只是 body 為程式碼字串。 */
   private sandboxedSpecs = new Map<string, SandboxedSpec>();
 
-  constructor(opts: SessionOptions = {}) {
-    this.session = new InvestigationSession(opts);
+  constructor(opts: WorkspaceOptions = {}) {
+    const { projectDir, ...sessionOpts } = opts;
+    this.session = new InvestigationSession(sessionOpts);
     registerPrimitives(this.registry, this.session);
+
+    if (projectDir) {
+      this.store = new ProjectStore(projectDir);
+      this.loadPersistedTools();
+    }
+  }
+
+  /**
+   * 從專案目錄載回先前存下的工具。
+   *
+   * 只有 Tier 1/2 會被持久化 —— 原語的行為在程式碼裡，
+   * 每次啟動由 registerPrimitives 重新註冊。
+   */
+  private loadPersistedTools(): void {
+    if (!this.store) return;
+    for (const t of this.store.listTools()) {
+      if (t.def.tier === 'declarative') {
+        this.registerDeclarative(t.def, t.spec as DeclarativeSpec, false);
+      } else if (t.def.tier === 'sandboxed') {
+        this.registerSandboxed(t.def, t.spec as SandboxedSpec, false);
+      }
+    }
   }
 
   /**
@@ -47,12 +83,17 @@ export class Workspace {
    * 這是「AI 寫的工具」與「匯入的工具」在 Tier 1 的形式：
    * 純資料、不含程式碼，可儲存、可傳輸、可審查。
    */
-  registerDeclarative(def: ToolDefinition, spec: DeclarativeSpec): void {
+  registerDeclarative(
+    def: ToolDefinition,
+    spec: DeclarativeSpec,
+    persist = true,
+  ): void {
     this.declarativeSpecs.set(def.name, spec);
     this.registry.upsert(def, async (args, scope) => {
       const mode = (args.mode as ExecutionMode) ?? 'dry-run';
       return runDeclarative(spec, scope as never, mode);
     });
+    if (persist) this.store?.saveTool(def, spec);
   }
 
   getDeclarativeSpec(name: string): DeclarativeSpec | undefined {
@@ -68,9 +109,14 @@ export class Workspace {
    * 宣告過的 capabilities 所對應的函式。沒有 fetch、
    * 沒有 require、沒有檔案系統，全域環境是空的。
    */
-  registerSandboxed(def: ToolDefinition, spec: SandboxedSpec): void {
+  registerSandboxed(
+    def: ToolDefinition,
+    spec: SandboxedSpec,
+    persist = true,
+  ): void {
     this.sandboxedSpecs.set(def.name, spec);
     this.registry.upsert({ ...def, tier: 'sandboxed' }, makeSandboxHandler(spec));
+    if (persist) this.store?.saveTool({ ...def, tier: 'sandboxed' }, spec);
   }
 
   getSandboxedSpec(name: string): SandboxedSpec | undefined {
@@ -115,7 +161,54 @@ export class Workspace {
     );
   }
 
+  /**
+   * 把目前 session 的觀測記錄寫入專案。
+   *
+   * 綁定是策略的產物而非觀測事實，因此一併記下產生它的
+   * 策略與時間窗，日後策略改變時可重新計算。
+   */
+  persistSession(sessionId: string): void {
+    if (!this.store) return;
+    const st = this.session.status();
+    this.store.saveSession({
+      id: sessionId,
+      startedAt: Date.now(),
+      ...(st.pageUrl ? { startUrl: st.pageUrl } : {}),
+      strategy: this.session.strategy,
+      windowMs: this.session.windowMs,
+    });
+    this.store.saveObservations(
+      sessionId,
+      this.session.actions,
+      this.session.flows,
+      this.session.bindings(),
+    );
+  }
+
+  /** 核准工具的當前內容。核准綁定到 spec 雜湊，內容改變即失效。 */
+  approveTool(name: string, note?: string): ToolResult<{ approved: true }> {
+    if (!this.store) {
+      return fail('INVALID_ARGUMENT', 'no project directory configured');
+    }
+    const entry = this.registry.get(name);
+    if (!entry) return fail('NOT_FOUND', `unknown tool: ${name}`);
+
+    const spec =
+      this.declarativeSpecs.get(name) ?? this.sandboxedSpecs.get(name) ?? null;
+    this.store.approveTool(name, spec, entry.def.capabilities, note);
+    return ok({ approved: true });
+  }
+
+  /** 該工具的當前內容是否已被核准 */
+  isToolApproved(name: string): boolean {
+    if (!this.store) return false;
+    const spec =
+      this.declarativeSpecs.get(name) ?? this.sandboxedSpecs.get(name) ?? null;
+    return this.store.isApproved(name, spec);
+  }
+
   async close(): Promise<void> {
     await this.session.stop();
+    this.store?.close();
   }
 }

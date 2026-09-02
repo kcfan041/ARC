@@ -12,6 +12,7 @@
     "@arc/browser-runtime": "*",
     "@arc/core-model": "*",
     "@arc/correlator": "*",
-    "@arc/tool-runtime": "*"
+    "@arc/tool-runtime": "*",
+    "@arc/core-store": "*"
   }
 }
