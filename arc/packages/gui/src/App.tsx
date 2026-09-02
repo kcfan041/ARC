@@ -3,6 +3,7 @@ import { useSession } from './lib/useSession';
 import { Timeline } from './panels/Timeline';
 import { NetworkList } from './panels/NetworkList';
 import { FlowDetail } from './panels/FlowDetail';
+import { Tools } from './panels/Tools';
 
 /**
  * ARC 主畫面
@@ -20,7 +21,7 @@ import { FlowDetail } from './panels/FlowDetail';
  *   共用的成熟模式，使用者不需重新學習。
  */
 
-type Tab = 'timeline' | 'network';
+type Tab = 'timeline' | 'network' | 'tools';
 
 export function App() {
   const s = useSession();
@@ -78,38 +79,51 @@ export function App() {
           >
             Network
           </button>
+          <button
+            className={'tab' + (tab === 'tools' ? ' on' : '')}
+            onClick={() => setTab('tools')}
+          >
+            Tools
+          </button>
         </nav>
       </header>
 
-      <main className="body">
-        <section className="left">
-          {tab === 'timeline' ? (
-            <Timeline
-              actions={s.actions}
-              bindingByAction={s.bindingByAction}
-              flowById={s.flowById}
-              selectedFlowId={selectedFlowId}
-              onSelectFlow={setSelectedFlowId}
-            />
-          ) : (
-            <NetworkList
-              flows={s.flows}
-              boundFlowIds={s.boundFlowIds}
-              showFiltered={showFiltered}
-              selectedId={selectedFlowId}
-              onSelect={setSelectedFlowId}
-            />
-          )}
-        </section>
+      {tab === 'tools' ? (
+        // 工具面板自帶主從式版面，佔滿整個工作區
+        <main className="body body-full">
+          <Tools />
+        </main>
+      ) : (
+        <main className="body">
+          <section className="left">
+            {tab === 'timeline' ? (
+              <Timeline
+                actions={s.actions}
+                bindingByAction={s.bindingByAction}
+                flowById={s.flowById}
+                selectedFlowId={selectedFlowId}
+                onSelectFlow={setSelectedFlowId}
+              />
+            ) : (
+              <NetworkList
+                flows={s.flows}
+                boundFlowIds={s.boundFlowIds}
+                showFiltered={showFiltered}
+                selectedId={selectedFlowId}
+                onSelect={setSelectedFlowId}
+              />
+            )}
+          </section>
 
-        <section className="right">
-          <FlowDetail
-            flow={selectedFlow}
-            actions={s.actions}
-            bindings={s.bindings}
-          />
-        </section>
-      </main>
+          <section className="right">
+            <FlowDetail
+              flow={selectedFlow}
+              actions={s.actions}
+              bindings={s.bindings}
+            />
+          </section>
+        </main>
+      )}
 
       <footer className="status">
         <span>{s.status.actionCount} actions</span>

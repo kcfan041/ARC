@@ -266,3 +266,169 @@ body {
   color: var(--fg3);
   opacity: 0.7;
 }
+
+/* ── 工具面板 ────────────────────────────────────── */
+
+.body-full { grid-template-columns: 1fr; }
+
+.tools {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  min-height: 0;
+  height: 100%;
+}
+
+.tools-list {
+  border-right: 1px solid var(--line);
+  overflow: auto;
+  min-height: 0;
+}
+
+.tools-bar {
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.tools-filter {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+}
+.tools-filter:focus { outline: none; border-color: var(--accent); }
+
+.btn.sm { padding: 4px 10px; font-size: 12px; }
+
+.tool-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--bg2);
+  font-size: 12px;
+}
+.tool-row:hover { background: var(--bg2); }
+.tool-row.is-sel { background: var(--bg3); }
+
+.tool-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* tier 標記 —— 外部工具刻意用警示色，信任等級不同 */
+.tier {
+  flex: none;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  background: var(--bg3);
+  color: var(--fg2);
+}
+.tier-primitive { color: var(--fg3); }
+.tier-declarative { color: var(--accent); }
+.tier-sandboxed { color: var(--green); }
+.tier-external { color: var(--amber); background: #3a2f14; }
+
+.badge {
+  flex: none;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+}
+.badge.ro { color: var(--fg3); }
+.badge.fx { color: var(--amber); }
+.badge.warn { color: var(--red); background: #3a1a1a; }
+
+.tools-detail {
+  overflow: auto;
+  min-height: 0;
+  padding: 12px 16px;
+  background: var(--bg2);
+}
+
+.tool-desc {
+  margin: 4px 0 0;
+  color: var(--fg2);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.caps { display: flex; flex-wrap: wrap; gap: 5px; }
+
+.cap {
+  padding: 2px 7px;
+  background: #3a2f14;
+  color: var(--amber);
+  border-radius: 3px;
+  font-size: 11px;
+}
+.cap.ro { background: var(--bg3); color: var(--fg2); }
+
+.warn-box {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: #3a2f14;
+  border-left: 2px solid var(--amber);
+  border-radius: 3px;
+  color: var(--fg2);
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.args {
+  width: 100%;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  resize: vertical;
+}
+.args:focus { outline: none; border-color: var(--accent); }
+
+.tool-actions { display: flex; gap: 6px; margin-top: 8px; }
+
+.schema-hint {
+  margin-top: 8px;
+  color: var(--fg3);
+  font-size: 11px;
+}
+
+.param {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  background: var(--bg3);
+  border-radius: 3px;
+  color: var(--fg2);
+}
+.param em { margin-left: 4px; color: var(--fg3); font-style: normal; }
+
+.result {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.6;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
