@@ -1,15 +1,42 @@
 import { ToolRegistry } from '@arc/tool-runtime';
 import {
+  packageTool,
+  resolveName,
+  reviewImport,
   runDeclarative,
   type DeclarativeSpec,
   type ExecutionMode,
 } from '@arc/tool-runtime';
-import type { ToolDefinition, ToolResult } from '@arc/core-model';
+import type {
+  Capability,
+  ImportReview,
+  ToolDefinition,
+  ToolPackage,
+  ToolResult,
+} from '@arc/core-model';
 import { fail, ok } from '@arc/core-model';
+
+/**
+ * 本機支援的能力集合。
+ *
+ * 匯入的工具若宣告了不在此列的能力，代表本機無法提供 ——
+ * 應在審查階段擋下，而非等到執行時才失敗。
+ */
+const KNOWN_CAPABILITIES: ReadonlySet<Capability> = new Set<Capability>([
+  'session.read',
+  'network.read',
+  'storage.read',
+  'code.read',
+  'browser.navigate',
+  'browser.interact',
+  'network.replay',
+  'browser.eval',
+]);
 import { ProjectStore } from '@arc/core-store';
 import { InvestigationSession, type SessionOptions } from './session.js';
 import { registerPrimitives } from './primitives.js';
 import { makeSandboxHandler, type SandboxedSpec } from './sandboxed.js';
+import { ExternalServers, type McpServerSpec } from './external.js';
 
 /**
  * Workspace —— Session 與 Registry 的組合
@@ -42,6 +69,9 @@ export class Workspace {
 
   /** 專案儲存。未指定 projectDir 時為 undefined。 */
   readonly store?: ProjectStore;
+
+  /** 外部 MCP Server（Tier 3）的連線管理 */
+  private readonly external = new ExternalServers(this.registry);
 
   /** 已註冊的宣告式工具規格。Tier 1 工具是純資料，可儲存與傳輸。 */
   private declarativeSpecs = new Map<string, DeclarativeSpec>();
@@ -162,6 +192,116 @@ export class Workspace {
   }
 
   /**
+   * 匯出為可傳輸的封裝格式。
+   *
+   * 與 exportTool 的差別：附上內容雜湊與版本標示，
+   * 適合寫成檔案分享。
+   */
+  packageTool(name: string, exportedBy?: string): ToolResult<ToolPackage> {
+    const exported = this.exportTool(name);
+    if (!exported.ok) return exported;
+    return ok(packageTool(exported.data.def, exported.data.spec, exportedBy));
+  }
+
+  /**
+   * 匯入前審查。不改變任何狀態。
+   *
+   * 回傳的資訊即為確認畫面所需的全部內容 ——
+   * 該工具宣告了哪些能力、是否全為唯讀、有無名稱衝突。
+   */
+  reviewImport(pkg: unknown): ImportReview | { error: string } {
+    return reviewImport(pkg, {
+      existingNames: this.toolNames(),
+      knownCapabilities: KNOWN_CAPABILITIES,
+    });
+  }
+
+  /** 目前已註冊的所有工具名稱，用於偵測衝突與改名 */
+  private toolNames(): ReadonlySet<string> {
+    const res = this.registry.list({ limit: 10_000 });
+    return new Set(res.ok ? res.data.map((d) => d.name) : []);
+  }
+
+  /**
+   * 連接外部 MCP Server（Tier 3）。
+   *
+   * 其工具會出現在同一個 registry，因此對 LLM 而言介面與
+   * 內建工具相同。但信任等級不同：執行發生在對方程序，
+   * capability 注入對它不適用 —— 我方無法限制它做什麼。
+   *
+   * 因此外部工具的 capabilities 一律為空陣列，
+   * tier 標為 external，讓 UI 能明確區分。
+   */
+  connectMcpServer(spec: McpServerSpec) {
+    return this.external.connect(spec);
+  }
+
+  disconnectMcpServer(serverName: string): Promise<boolean> {
+    return this.external.disconnect(serverName);
+  }
+
+  get mcpServers() {
+    return this.external.servers;
+  }
+
+  /**
+   * 匯入工具。
+   *
+   * 呼叫端應先執行 reviewImport 並取得人工確認。
+   * 本函式仍會重跑審查以擋下 blocker —— 因為 MCP Server
+   * 之類的呼叫端可能繞過 UI 流程。
+   *
+   * 名稱衝突一律改名而非覆蓋：直接覆蓋會讓使用者失去
+   * 內建功能且難以察覺。
+   */
+  importTool(
+    pkg: unknown,
+    opts: { approve?: boolean; source?: string } = {},
+  ): ToolResult<{ name: string; renamed: boolean; approved: boolean }> {
+    const review = this.reviewImport(pkg);
+    if ('error' in review) {
+      return fail('INVALID_ARGUMENT', review.error);
+    }
+    if (review.blockers.length > 0) {
+      return fail('INVALID_ARGUMENT', review.blockers.join('; '));
+    }
+
+    const p = pkg as ToolPackage;
+    const finalName = resolveName(p.def.name, this.toolNames(), opts.source);
+
+    const def: ToolDefinition = {
+      ...p.def,
+      name: finalName,
+      origin: {
+        kind: 'imported',
+        ...(opts.source ? { from: opts.source } : {}),
+      },
+    };
+
+    if (def.tier === 'declarative') {
+      this.registerDeclarative(def, p.spec as DeclarativeSpec);
+    } else {
+      this.registerSandboxed(def, p.spec as SandboxedSpec);
+    }
+
+    // 全唯讀的工具可自動核准 —— 此判定依 capabilities 而非
+    // annotations，因此可信（見 MVP1-PLAN 3A.2）
+    const autoApprove = opts.approve ?? review.allReadOnly;
+    if (autoApprove) {
+      this.approveTool(
+        finalName,
+        review.allReadOnly ? '唯讀工具，自動核准' : '匯入時人工核准',
+      );
+    }
+
+    return ok({
+      name: finalName,
+      renamed: finalName !== p.def.name,
+      approved: autoApprove,
+    });
+  }
+
+  /**
    * 把目前 session 的觀測記錄寫入專案。
    *
    * 綁定是策略的產物而非觀測事實，因此一併記下產生它的
@@ -208,6 +348,9 @@ export class Workspace {
   }
 
   async close(): Promise<void> {
+    // 外部 server 先關 —— 它們是子程序，殘留會導致
+    // 測試與 CLI 無法正常結束
+    await this.external.closeAll();
     await this.session.stop();
     this.store?.close();
   }

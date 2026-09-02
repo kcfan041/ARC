@@ -20,6 +20,7 @@ export * from './session.js';
 export * from './primitives.js';
 export * from './workspace.js';
 export * from './sandboxed.js';
+export * from './external.js';
 
 // 型別轉出，讓 gui / cli 不需直接依賴 core-model
 export type {
@@ -40,7 +41,15 @@ export type {
   ToolAnnotations,
 } from '@arc/core-model';
 
-export { isReadOnlyTool, READ_ONLY_CAPABILITIES, TOOL_LIMITS } from '@arc/core-model';
+export {
+  isReadOnlyTool,
+  READ_ONLY_CAPABILITIES,
+  TOOL_LIMITS,
+  TOOL_PACKAGE_VERSION,
+  isToolPackage,
+} from '@arc/core-model';
+export type { ToolPackage, ImportReview } from '@arc/core-model';
+export { computeIntegrity, packageTool, resolveName } from '@arc/tool-runtime';
 export {
   AGENT_DEFAULT_CAPABILITIES,
   matchDomain,

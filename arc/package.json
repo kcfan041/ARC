@@ -22,7 +22,8 @@
     "agent:check": "npm run agent --workspace @arc/spike-s1",
     "mcp": "tsx packages/mcp-server/src/run.ts",
     "mcp:check": "npm run mcp --workspace @arc/spike-s1",
-    "store:check": "npm run store --workspace @arc/spike-s1"
+    "store:check": "npm run store --workspace @arc/spike-s1",
+    "import:check": "npm run import --workspace @arc/spike-s1"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

@@ -17,6 +17,9 @@
       "path": "packages/tool-runtime"
     },
     {
+      "path": "packages/mcp-client"
+    },
+    {
       "path": "packages/core-tools"
     },
     {

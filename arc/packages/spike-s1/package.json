@@ -12,7 +12,8 @@
     "sandbox": "tsx src/run-sandbox-check.ts",
     "agent": "tsx src/run-agent-check.ts",
     "mcp": "tsx src/run-mcp-check.ts",
-    "store": "tsx src/run-store-check.ts"
+    "store": "tsx src/run-store-check.ts",
+    "import": "tsx src/run-import-check.ts"
   },
   "dependencies": {
     "@arc/browser-runtime": "*",

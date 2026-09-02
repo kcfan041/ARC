@@ -13,6 +13,7 @@
     "@arc/core-model": "*",
     "@arc/correlator": "*",
     "@arc/tool-runtime": "*",
-    "@arc/core-store": "*"
+    "@arc/core-store": "*",
+    "@arc/mcp-client": "*"
   }
 }

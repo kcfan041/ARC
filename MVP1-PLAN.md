@@ -1008,7 +1008,7 @@ args 以 `JSON.stringify` 注入為變數，而非字串拼接。
 | **P2.5** | agent-facade、LLM Provider 抽象、敏感資料遮蔽 | ✅ **已完成** |
 | **P3** | MCP Server（stdio） | ✅ **已完成** |
 | **P3.5** | core-store 持久化（解 REVIEW T4） | ✅ **已完成** |
-| P4 | MCP Client、匯入匯出、信任鏈 | 待做 |
+| **P4** | MCP Client、匯入匯出、信任鏈 | ✅ **已完成** |
 | P5 | 作用域啟動、`find_tools`、分頁 | 部分（scope 已可用） |
 | P6 | GUI 工具面板 | 待做 |
 | P7 | S2 合併：用 Tier 1 驗證覆蓋率 | 待做 |
@@ -1092,7 +1092,7 @@ schema          tool / tool_approval / investigation / session /
 未設專案目錄     仍可正常運作，工具僅存在於記憶體
 ```
 
-### 3A.8 信任模型（P4 設計）
+### 3A.8 信任模型（P4）
 
 ```text
 匯入時   顯示該工具宣告了哪些能力 → 人工確認一次
@@ -1100,8 +1100,55 @@ schema          tool / tool_approval / investigation / session /
 記錄     來源、是人寫還是 AI 生成、宣告的能力、是否已審
 
 唯讀工具（capabilities 全在 READ_ONLY_CAPABILITIES 內）
-可考慮免確認 —— 這個判定依 capabilities 而非 annotations，
+自動核准 —— 這個判定依 capabilities 而非 annotations，
 因此可信。
+```
+
+**P4 驗收結果**（48/48 通過，`npm run import:check`）：
+
+```text
+封裝          含版本與內容雜湊，雜湊對鍵順序穩定
+匯入審查      原語不可匯入、未知能力擋下、
+              雜湊不符發警告、annotations 謊稱唯讀時發警告
+名稱衝突      ★ 自動改名而非覆蓋，內建原語不會被取代
+信任鏈        ★ 唯讀自動核准；有副作用需人工核准
+              ★ 內容改動後核准自動失效
+匯出往返      spec 內容不變，雜湊自洽
+重啟          匯入的工具與核准狀態皆保留
+Tier 3        ★ 可連接外部 MCP Server 並透過協定呼叫
+              ★ 外部工具 tier=external、capabilities 為空
+              中斷後工具自 registry 移除
+```
+
+#### 「匯入」其實是兩件事
+
+實作時才確認這兩者的信任模型**根本不同**：
+
+| | 檔案匯入（Tier 1/2） | 外部 MCP Server（Tier 3） |
+|---|---|---|
+| 內容 | 可完整審查 | 黑箱 |
+| 執行位置 | 我方沙箱 | **對方程序** |
+| capability 注入 | 適用，不可逾越 | **不適用** |
+| 實際信任等級 | 受控 | 等同執行第三方程式 |
+
+因此外部工具的 `capabilities` 一律標為**空陣列** ——
+不是「不需要能力」，而是「宣稱任何能力都沒有意義」。
+我方能控制的只有「是否呼叫」與「傳什麼參數」。
+
+`tier: 'external'` 讓 UI 能誠實反映這個差異。這一點不能
+含糊：把外部工具與沙箱工具並列顯示而不加區別，
+會讓使用者誤以為兩者受同等約束。
+
+#### 名稱衝突一律改名
+
+匯入的工具若與內建原語同名，直接覆蓋會讓使用者失去
+內建功能且難以察覺。因此改名而非覆蓋：
+
+```text
+network_list（已存在）
+  ← 匯入來自 partner 的同名工具
+  → 註冊為 partner_network_list
+  → 內建的 network_list 維持原樣
 ```
 
 ---
