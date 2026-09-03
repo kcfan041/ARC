@@ -16,7 +16,8 @@
     "import": "tsx src/run-import-check.ts",
     "discovery": "tsx src/run-discovery-check.ts",
     "coverage": "tsx src/run-coverage-check.ts",
-    "body": "tsx src/run-body-check.ts"
+    "body": "tsx src/run-body-check.ts",
+    "observe": "tsx src/run-observe-check.ts"
   },
   "dependencies": {
     "@arc/browser-runtime": "*",

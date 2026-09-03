@@ -124,3 +124,54 @@ export function extractMarker(url: string): string | undefined {
     return undefined;
   }
 }
+
+/**
+ * 瀏覽器儲存快照
+ *
+ * cookie 經由 CDP／Playwright 的 context 取得，因此涵蓋
+ * HttpOnly 項目 —— document.cookie 看不到那些，
+ * 而登入 token 常常正是 HttpOnly。
+ */
+export type CookieRecord = {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  httpOnly: boolean;
+  secure: boolean;
+  expires?: number;
+};
+
+export type StorageSnapshot = {
+  cookies: CookieRecord[];
+  localStorage: Record<string, string>;
+  sessionStorage: Record<string, string>;
+  at: EpochMs;
+};
+
+/** 兩份快照之間的差異 */
+export type StorageChange = {
+  area: 'cookie' | 'localStorage' | 'sessionStorage';
+  key: string;
+  kind: 'added' | 'changed' | 'removed';
+  before?: string;
+  after?: string;
+};
+
+/**
+ * 可互動元素摘要
+ *
+ * 刻意不含完整 DOM —— 複雜 SPA 的 DOM 可達數 MB，
+ * 塞進 prompt 會直接違反原規格書 §37 的 context 控制原則。
+ * 只保留決定「下一步做什麼」所需的資訊。
+ */
+export type InteractableElement = {
+  tag: string;
+  /** 建議的定位方式。無穩定屬性時可能為空。 */
+  selector?: string;
+  text?: string;
+  type?: string;
+  label?: string;
+  href?: string;
+  disabled?: boolean;
+};

@@ -1012,6 +1012,7 @@ args 以 `JSON.stringify` 注入為變數，而非字串拼接。
 | **P5** | 作用域啟動、`find_tools`、分頁 | ✅ **已完成** |
 | **P6** | GUI 工具面板 | ✅ **已完成** |
 | **P7** | S2 合併：用 Tier 1 驗證覆蓋率 | ✅ **已完成** |
+| **P8** | 觀測能力補完：response body、storage、互動原語 | ✅ **已完成** |
 
 **P1 驗收結果**（30/30 通過）：
 
@@ -1349,6 +1350,132 @@ body path 寫入   可涵蓋巢狀參數
 
 ---
 
+### 3A.12 觀測能力補完（P8）
+
+P1–P7 建立的是**工具框架**；框架本身正確，但可觀測的東西不夠。
+本階段補上 2.2 A 節列出卻尚未實作的觀測面：response 內容、
+storage、以及工具驅動的互動。
+
+#### 為什麼補這三項
+
+```text
+response body    只有 request 等於只知道「問了什麼」，
+                 不知道「拿回什麼」—— 而使用者要找的媒體連結
+                 與資料結構全都在 response 裡
+
+storage          token 存到哪裡，是反爬站 session 復原的前提
+                 （2.2 B「Session 保存與復原」的依賴項）
+
+互動原語         LLM 過去只能讀，不能動。無法驗證假設，
+                 也無法在使用者不在場時完成一輪觀察
+```
+
+**Response 擷取驗收**（36/36，`npm run body:check`）：
+
+```text
+status / headers / body 三者皆可取得
+擷取預算          大型內容截斷，串流 segment 預設不擷取
+GUI FlowDetail    人工可直接檢視
+```
+
+實作時踩到三個 CDP 的真實行為，皆與直覺相反，記錄於此以免重犯：
+
+| 現象 | 真正的原因 |
+|---|---|
+| body 取回為空或被截斷 | CDP 緩衝區須**大於**我方的截斷上限，否則在我方截斷前資料已遺失 |
+| 取不到 Set-Cookie | 它只出現在 `ExtraInfo` 事件，不在 `responseReceived` |
+| headers 缺漏 | `ExtraInfo` 可能**早於** `responseReceived` 抵達，須合併而非覆寫 |
+
+第三點是典型的事件順序假設錯誤 —— 用「後到的覆蓋先到的」處理
+兩個獨立事件流，在順序反轉時會靜默丟失資料。
+
+**觀測原語驗收**（33/33，`npm run observe:check`）：
+
+```text
+storage_get         cookie / localStorage / sessionStorage 三區
+storage_diff        追蹤 token 落到哪個儲存區
+page_interactables  ★ 不回傳完整 DOM，只回傳可互動元素與定位方式
+browser_click       ★ 工具觸發的點擊會被記錄為 action，
+browser_fill           因此可經綁定追出後果 —— 與人工操作同一條路徑
+browser_press
+```
+
+`page_interactables` 不回傳完整 DOM 是 context 管理的延續
+（3A.6）—— 整份 DOM 會吃掉數萬 token，而 LLM 需要的只是
+「有什麼可以點」。
+
+#### ★ 發現一：cookie 值躲過了遮蔽
+
+`agent-facade` 原本以**鍵名比對**判定敏感欄位。但 cookie 的結構是：
+
+```text
+{ name: "session", value: "eyJhbGci..." }
+             ↑ 鍵名是 "value"，不是 "session"
+```
+
+比對的是 `value` 這個字，與敏感性無關 —— **整個 cookie 值直接
+外流給 LLM**。
+
+修法是加入結構判定 `isCookieRecord()`：同時具備 `name`、`value`
+與至少一個 cookie 專屬屬性（`domain` / `path` / `httpOnly` /
+`secure`）才視為 cookie。三重條件是為了避開誤判 —— 表單欄位與
+`<select>` 選項同樣是 `{name, value}`。
+
+保留 name、只遮 value：`session`、`csrftoken` 這類名稱對分析有用，
+本身不是機密。
+
+**這件事的意義超出修一個 bug。** 它說明鍵名比對這套方法的
+前提是「敏感性寫在鍵名上」，而該前提對任何**包裝過的結構**
+都不成立。3.8 的上界原則要求限制只存在於 facade —— 那就
+必須確保 facade 真的攔得住。日後新增任何 `{name, value}` 形態的
+資料結構（header 清單、query 參數表），都要重新檢查這條路徑。
+
+#### ★ 發現二：tsx／esbuild 的 `__name` 注入
+
+`page.evaluate` 傳入具名函式時，頁面端拋 `__name is not defined`。
+
+原因是 tsx／esbuild 為保留函式名稱會注入 `__name` 輔助函式，
+而該輔助函式**只存在於 Node 端的模組作用域**。函式被序列化送進
+頁面後，引用了一個對面不存在的東西。
+
+解法是改以字串形式傳入 —— 字串不經轉譯。
+
+這是**跨 realm 注入的通用陷阱**：送過去的程式碼會脫離原本的
+編譯環境。專案內所有 `page.evaluate` 都適用（`session.ts:237`、
+`:331` 已改；`:392` 傳的是純資料不受影響）。
+
+#### 命名與 REVIEW.md 建議的分歧
+
+`REVIEW.md:1930-1933` 建議拆成 `browser_get_cookies` /
+`browser_get_local_storage` / `browser_get_session_storage`。
+實作合併為單一 `storage_get`：
+
+```text
+三者幾乎總是一起看（token 可能落在任一區）
+拆三個工具會佔用三個常駐名額（3A.6 context 預算）
+```
+
+`storage_*` 而非 `browser_*` 前綴，是因為它們讀的是儲存狀態，
+不是瀏覽器控制動作 —— 與 `browser_click` 這類有副作用的操作
+在語意上分開。
+
+#### 已知限制
+
+```text
+storageBaseline 是模組層級變數（primitives.ts:67）
+  → diff 的語意是「與上次觀察相比」，只支援單一觀察序列
+  → 多序列需求出現時，改為呼叫端傳入具名基準
+
+storage 快照不進 core-store
+  → 重啟即失，2.2 B 的「Session 復原」尚未接通
+
+新原語沒有 GUI 面板
+  → 目前只有 LLM 與 MCP 走得到，人工走不到
+  → 與 Human-first 原則有張力，待補
+```
+
+---
+
 ## 4. 與原規格書的差異對照
 
 ### 4.1 保留
@@ -1656,6 +1783,15 @@ core-tools 的完整能力完成工作，只是 LLM 的協助範圍縮小。
      XHR / Fetch / EventSource / WebSocket 類型
    → 對「找出資料來源 API」是正確取捨
    → 但若日後要支援媒體資源追蹤，需開放此條件
+
+7. storage 快照不持久化（P8）
+   → 只在記憶體中，關閉即失
+   → 2.2 B 的「Session 保存與復原」因此尚未接通，
+     而該項對反爬站是必要功能而非加分項
+
+8. storage / 互動原語沒有 GUI 面板（P8）
+   → 只有 LLM 與 MCP 走得到，人工反而走不到
+   → 與 Human-first 原則有張力，是目前最該優先補的缺口
 ```
 
 ---

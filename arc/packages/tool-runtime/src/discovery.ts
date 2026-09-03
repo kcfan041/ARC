@@ -34,6 +34,12 @@ export const ALWAYS_VISIBLE = new Set([
   'network_get',
   'network_get_body',
   'action_get_effects',
+  'storage_get',
+  'storage_diff',
+  'page_interactables',
+  'browser_click',
+  'browser_fill',
+  'browser_press',
   'find_tools',
 ]);
 

@@ -42,6 +42,7 @@ const SENSITIVE_KEY_PATTERN =
 
 export type RedactionType =
   | 'header'
+  | 'cookie'
   | 'jwt'
   | 'bearer'
   | 'long-base64'
@@ -171,6 +172,24 @@ function redactHeaders(
 }
 
 /**
+ * 判斷是否為 cookie 記錄。
+ *
+ * cookie 的 value 依定義就是憑證，但它的結構是
+ * { name: "session", value: "abc123" } —— 鍵名是 "value"
+ * 而非 "session"，因此躲過了 SENSITIVE_KEY_PATTERN 的比對。
+ *
+ * 要求同時具備 name、value 與至少一個 cookie 專屬屬性，
+ * 避免誤判一般的鍵值對（表單欄位、select 選項也是 name/value）。
+ */
+function isCookieRecord(o: Record<string, unknown>): boolean {
+  return (
+    typeof o.name === 'string' &&
+    typeof o.value === 'string' &&
+    ('domain' in o || 'path' in o || 'httpOnly' in o || 'secure' in o)
+  );
+}
+
+/**
  * 遞迴遮蔽任意結構。
  *
  * 對物件的鍵名做語意判斷（token / password / secret 等），
@@ -192,9 +211,17 @@ function walk(
   }
   if (value && typeof value === 'object') {
     const obj = value as Record<string, unknown>;
+    const cookieShaped = isCookieRecord(obj);
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(obj)) {
       const childPath = path ? `${path}.${k}` : k;
+
+      // cookie 值一律遮蔽 —— 名稱保留，因為 session、csrftoken
+      // 這類名稱對分析有用且本身不是機密
+      if (cookieShaped && k === 'value' && typeof v === 'string' && v) {
+        out[k] = ledger.mark(v, 'cookie', childPath);
+        continue;
+      }
 
       // headers 這類欄位整組套用固定規則
       if (/^(headers|requestHeaders|responseHeaders)$/i.test(k) && v && typeof v === 'object') {

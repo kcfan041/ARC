@@ -2,6 +2,8 @@ import type {
   ActionRecord,
   Binding,
   FlowRecord,
+  InteractableElement,
+  StorageSnapshot,
   StrategyName,
 } from '@arc/core-model';
 import {
@@ -208,6 +210,169 @@ export class InvestigationSession {
     const inMemory = this.rec?.bodies.get(hash);
     if (inMemory) return inMemory;
     return this.opts.getObject?.(hash);
+  }
+
+  /**
+   * 讀取瀏覽器儲存狀態。
+   *
+   * cookie 走 CDP 的 Storage domain 而非 document.cookie ——
+   * 後者看不到 HttpOnly 的項目，而登入 token 常常正是 HttpOnly。
+   * 這對「追查 token 存到哪裡」是關鍵差異。
+   *
+   * localStorage / sessionStorage 只能在頁面 context 中讀取，
+   * 因此走 evaluate。
+   */
+  async storage(): Promise<StorageSnapshot> {
+    if (!this.rec) {
+      return { cookies: [], localStorage: {}, sessionStorage: {}, at: Date.now() };
+    }
+
+    const cookies = await this.rec.context.cookies();
+
+    // 以字串形式傳入而非函式。
+    //
+    // tsx／esbuild 會為具名函式注入 __name 輔助函式，
+    // 那在頁面環境中不存在，導致 ReferenceError。
+    // 字串不經轉譯，因此不受影響。
+    const web = (await this.rec.page.evaluate(`(function () {
+      function dump(s) {
+        var out = {};
+        for (var i = 0; i < s.length; i += 1) {
+          var k = s.key(i);
+          if (k !== null) out[k] = s.getItem(k) || '';
+        }
+        return out;
+      }
+      try {
+        return {
+          localStorage: dump(window.localStorage),
+          sessionStorage: dump(window.sessionStorage)
+        };
+      } catch (e) {
+        // about:blank 或第三方 cookie 政策下會拋 SecurityError
+        return { localStorage: {}, sessionStorage: {} };
+      }
+    })()`)) as {
+      localStorage: Record<string, string>;
+      sessionStorage: Record<string, string>;
+    };
+
+    return {
+      cookies: cookies.map((c) => ({
+        name: c.name,
+        value: c.value,
+        domain: c.domain,
+        path: c.path,
+        httpOnly: c.httpOnly,
+        secure: c.secure,
+        ...(c.expires && c.expires > 0 ? { expires: c.expires } : {}),
+      })),
+      localStorage: web.localStorage,
+      sessionStorage: web.sessionStorage,
+      at: Date.now(),
+    };
+  }
+
+  /**
+   * 點擊元素。
+   *
+   * 依原規格書 §11.1 的操作優先序：DOM selector 優先於座標。
+   * 這裡只支援 selector 與可見文字，不提供滑鼠座標 ——
+   * 座標在版面變動時會失效，且無法從記錄回推意圖。
+   */
+  async click(target: { selector?: string; text?: string }): Promise<void> {
+    const page = this.requirePage();
+    if (target.selector) {
+      await page.click(target.selector, { timeout: 10_000 });
+      return;
+    }
+    if (target.text) {
+      // 以可見文字定位，涵蓋按鈕與連結
+      await page
+        .getByText(target.text, { exact: false })
+        .first()
+        .click({ timeout: 10_000 });
+      return;
+    }
+    throw new Error('click requires selector or text');
+  }
+
+  /** 填入表單欄位。會先清空既有內容。 */
+  async fill(selector: string, value: string): Promise<void> {
+    await this.requirePage().fill(selector, value, { timeout: 10_000 });
+  }
+
+  /** 按鍵。用於送出表單或觸發快捷鍵。 */
+  async press(key: string, selector?: string): Promise<void> {
+    const page = this.requirePage();
+    if (selector) {
+      await page.press(selector, key, { timeout: 10_000 });
+    } else {
+      await page.keyboard.press(key);
+    }
+  }
+
+  /**
+   * 取得頁面上可互動元素的摘要。
+   *
+   * 不回傳完整 DOM —— 複雜 SPA 的 DOM 可達數 MB，
+   * 塞進 prompt 會直接違反原規格書 §37 的 context 控制原則。
+   *
+   * 改為只列出可點擊與可輸入的元素，這是決定「下一步做什麼」
+   * 所需的資訊。定位優先採用穩定的屬性（id、name、
+   * data-testid、aria-label），與 §11.1 的優先序一致。
+   */
+  async interactables(limit = 100): Promise<InteractableElement[]> {
+    const page = this.requirePage();
+    // 數值先夾在合理範圍再內插，避免任何注入可能
+    const max = Math.min(Math.max(1, Math.floor(limit)), 500);
+
+    // 同樣以字串傳入，理由見 storage() 的註解
+    return (await page.evaluate(`(function () {
+      var sel = 'a[href], button, input, select, textarea, ' +
+        '[role="button"], [role="link"], [role="tab"], [onclick]';
+      var nodes = document.querySelectorAll(sel);
+      var out = [];
+
+      for (var i = 0; i < nodes.length; i += 1) {
+        if (out.length >= ${max}) break;
+        var el = nodes[i];
+
+        var rect = el.getBoundingClientRect();
+        var style = window.getComputedStyle(el);
+        if (rect.width <= 0 || rect.height <= 0) continue;
+        if (style.visibility === 'hidden' || style.display === 'none') continue;
+
+        // 定位優先序：id > data-testid > name > aria-label
+        var id = el.getAttribute('id');
+        var testId = el.getAttribute('data-testid');
+        var name = el.getAttribute('name');
+        var aria = el.getAttribute('aria-label');
+        var selector = '';
+        if (id) selector = '#' + (window.CSS && CSS.escape ? CSS.escape(id) : id);
+        else if (testId) selector = '[data-testid="' + testId + '"]';
+        else if (name) selector = el.tagName.toLowerCase() + '[name="' + name + '"]';
+        else if (aria) selector = '[aria-label="' + aria + '"]';
+
+        var text = ((el.innerText || el.getAttribute('value') || '') + '')
+          .trim().slice(0, 60);
+
+        var item = { tag: el.tagName.toLowerCase() };
+        if (selector) item.selector = selector;
+        if (text) item.text = text;
+        if (el.type) item.type = el.type;
+        if (aria) item.label = aria;
+        if (el.href) item.href = (el.href + '').slice(0, 200);
+        if (el.disabled) item.disabled = true;
+        out.push(item);
+      }
+      return out;
+    })()`)) as InteractableElement[];
+  }
+
+  private requirePage() {
+    if (!this.rec) throw new Error('session not started');
+    return this.rec.page;
   }
 
   async replay(
