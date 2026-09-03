@@ -279,6 +279,8 @@ export class ProjectStore {
       at: number;
       redirectIndex: number;
       initiator?: unknown;
+      response?: { status?: number };
+      body?: { hash?: string };
     }[],
     bindings: { actionId: string; flowIds: string[]; strategy: string; windowMs: number }[],
   ): void {
@@ -301,11 +303,13 @@ export class ProjectStore {
         );
       });
 
+      // status 與 resp_body_ref 是 P3.5 就預留的欄位，
+      // 到 response 擷取實作後才有值可填
       const insFlow = this.db.prepare(
         `INSERT OR REPLACE INTO flow
            (id, session_id, request_id, url, method, resource_type,
-            at, redirect_index, initiator)
-         VALUES (?,?,?,?,?,?,?,?,?)`,
+            at, redirect_index, initiator, status, resp_body_ref)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
       );
       for (const f of flows) {
         insFlow.run(
@@ -318,6 +322,8 @@ export class ProjectStore {
           f.at,
           f.redirectIndex,
           f.initiator ? JSON.stringify(f.initiator) : null,
+          f.response?.status ?? null,
+          f.body?.hash ?? null,
         );
       }
 
@@ -381,6 +387,10 @@ export class ProjectStore {
         at: Number(f.at),
         redirectIndex: Number(f.redirect_index),
         initiator: f.initiator ? JSON.parse(String(f.initiator)) : undefined,
+        status: f.status !== null && f.status !== undefined
+          ? Number(f.status)
+          : undefined,
+        bodyRef: f.resp_body_ref ? String(f.resp_body_ref) : undefined,
       })),
       bindings: [...byAction.values()],
     };

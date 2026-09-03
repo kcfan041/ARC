@@ -39,6 +39,55 @@ export type FlowInitiator = {
   lineNumber?: number;
 };
 
+/**
+ * Response body 的擷取狀態
+ *
+ * CDP 的 response body 在導航時會被清空，因此必須在
+ * loadingFinished 當下就取，不能等到使用者想看時才抓。
+ * 這代表擷取是持續成本，需要預算控制 —— 而預算耗盡、
+ * 內容過大、類型被排除都是正常結果，不是錯誤。
+ */
+export type BodyCaptureStatus =
+  /** 已完整擷取 */
+  | 'captured'
+  /** 超過單筆大小上限，只存了前綴 */
+  | 'truncated'
+  /** 已達 session 儲存預算上限 */
+  | 'budget-exceeded'
+  /** 類型被排除（例如串流 segment） */
+  | 'skipped'
+  /** CDP 取不到（常見於 redirect、快取命中、已被逐出） */
+  | 'unavailable';
+
+export type ResponseInfo = {
+  status: number;
+  statusText?: string;
+  /**
+   * Response headers。
+   *
+   * 含 Set-Cookie 等敏感內容 —— core-tools 保留原值
+   * （對人工零限制），送往 LLM 與 MCP client 前才遮蔽。
+   */
+  headers?: Record<string, string>;
+  mimeType?: string;
+  /** 是否來自快取。快取命中時通常取不到 body。 */
+  fromCache?: boolean;
+  /** CDP 回報的傳輸位元組數 */
+  encodedDataLength?: number;
+};
+
+export type BodyRef = {
+  status: BodyCaptureStatus;
+  /** content-addressed 雜湊，指向 objects/ 中的檔案 */
+  hash?: string;
+  /** 原始大小（位元組）。truncated 時為截斷前的大小。 */
+  size?: number;
+  /** 實際存下的位元組數 */
+  storedSize?: number;
+  /** 原始內容是否為 base64（二進位資源） */
+  base64?: boolean;
+};
+
 export type FlowRecord = {
   /** flow_1, flow_2, ... */
   id: string;
@@ -52,6 +101,14 @@ export type FlowRecord = {
   initiator: FlowInitiator;
   /** redirect 鏈中的第幾個，0 為原始請求 */
   redirectIndex: number;
+  /**
+   * Request headers。與 response headers 同樣含敏感內容。
+   */
+  requestHeaders?: Record<string, string>;
+  /** 回應資訊。requestWillBeSent 當下還沒有，稍後補上。 */
+  response?: ResponseInfo;
+  /** Response body 的擷取結果 */
+  body?: BodyRef;
   /**
    * fixture 用來標記自身身分的記號，僅供 S1 量測使用。
    * 從 URL query 中的 marker 參數取得。

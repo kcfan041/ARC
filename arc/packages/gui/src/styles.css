@@ -432,3 +432,5 @@ body {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+.status .warn-text { color: var(--amber); }

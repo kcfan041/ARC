@@ -23,6 +23,12 @@ import { Tools } from './panels/Tools';
 
 type Tab = 'timeline' | 'network' | 'tools';
 
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export function App() {
   const s = useSession();
   const [tab, setTab] = useState<Tab>('timeline');
@@ -138,6 +144,20 @@ export function App() {
           />
           顯示被過濾的請求
         </label>
+
+        {s.status.capture && s.status.capture.usedBytes > 0 && (
+          <span
+            className={s.status.capture.exceeded ? 'warn-text' : 'muted'}
+            title={
+              s.status.capture.exceeded
+                ? '已達儲存上限，之後的回應內容不再擷取（錄製繼續進行）'
+                : `已略過 ${s.status.capture.skipped} 筆`
+            }
+          >
+            已存 {fmtBytes(s.status.capture.usedBytes)}
+            {s.status.capture.exceeded && ' · 已達上限'}
+          </span>
+        )}
 
         <span className="spacer" />
         <span className="muted" title="來自 S1 實測：C/D 策略 @ 500ms">

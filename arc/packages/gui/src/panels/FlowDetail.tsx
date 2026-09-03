@@ -14,6 +14,28 @@ type Props = {
   bindings: Binding[];
 };
 
+/** 擷取狀態的簡短標籤，顯示在標題旁 */
+const BODY_LABEL: Record<string, string> = {
+  captured: '已擷取',
+  truncated: '已截斷',
+  'budget-exceeded': '未擷取',
+  skipped: '已略過',
+  unavailable: '無法取得',
+};
+
+/** 未取得內容時的說明。這些都是正常結果，不是錯誤。 */
+const BODY_REASON: Record<string, string> = {
+  'budget-exceeded': '已達本次工作階段的儲存上限',
+  skipped: '此類型預設不擷取（例如串流影片的分段檔）',
+  unavailable: '瀏覽器已無法提供此內容（可能來自快取或已被清除）',
+};
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function shortUrl(url: string): string {
   try {
     const u = new URL(url);
@@ -40,9 +62,47 @@ export function FlowDetail({ flow, actions, bindings }: Props) {
         <Row k="Method" v={flow.method} />
         <Row k="URL" v={flow.url} wrap />
         <Row k="Type" v={flow.resourceType ?? '—'} />
+        {flow.response && (
+          <Row
+            k="Status"
+            v={`${flow.response.status}${
+              flow.response.statusText ? ' ' + flow.response.statusText : ''
+            }${flow.response.fromCache ? '（快取）' : ''}`}
+          />
+        )}
+        {flow.response?.mimeType && (
+          <Row k="MIME" v={flow.response.mimeType} />
+        )}
         <Row k="Flow ID" v={flow.id} />
         {flow.redirectIndex > 0 && (
           <Row k="Redirect" v={`第 ${flow.redirectIndex} 次`} />
+        )}
+      </div>
+
+      <div className="d-sec">
+        <div className="d-title">
+          回應內容
+          {flow.body && (
+            <span className="d-note">{BODY_LABEL[flow.body.status]}</span>
+          )}
+        </div>
+        {!flow.body ? (
+          <div className="d-empty">尚未完成或未擷取</div>
+        ) : flow.body.status === 'captured' || flow.body.status === 'truncated' ? (
+          <>
+            <Row k="大小" v={formatBytes(flow.body.size ?? 0)} />
+            {flow.body.status === 'truncated' && (
+              <Row k="已存" v={formatBytes(flow.body.storedSize ?? 0)} />
+            )}
+            <Row k="內容" v={flow.body.base64 ? '二進位' : '文字'} />
+          </>
+        ) : (
+          <div className="d-empty">
+            {BODY_REASON[flow.body.status]}
+            {flow.body.size !== undefined && (
+              <div className="hint">原始大小 {formatBytes(flow.body.size)}</div>
+            )}
+          </div>
         )}
       </div>
 

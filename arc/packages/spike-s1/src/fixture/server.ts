@@ -20,6 +20,62 @@ export function startFixtureServer(port = FIXTURE_PORT) {
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`);
 
+    // ── response 擷取用的各類型端點 ──────────────────
+    //
+    // 刻意涵蓋文字、二進位、大型內容與敏感 header，
+    // 用以驗證擷取策略與遮蔽路徑。
+
+    if (url.pathname === '/blob/image.png') {
+      // 1x1 透明 PNG，用於驗證二進位擷取
+      const png = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk' +
+          'YPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+        'base64',
+      );
+      res.writeHead(200, { 'content-type': 'image/png' });
+      res.end(png);
+      return;
+    }
+
+    if (url.pathname === '/blob/large.json') {
+      // 超過測試用的單筆上限，驗證截斷
+      const size = Number(url.searchParams.get('size')) || 200_000;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ padding: 'x'.repeat(size) }));
+      return;
+    }
+
+    if (url.pathname === '/blob/script.js') {
+      res.writeHead(200, { 'content-type': 'text/javascript' });
+      res.end('export const answer = 42;\n');
+      return;
+    }
+
+    if (url.pathname === '/stream/seg-1.ts') {
+      // 串流分段，預設應被排除
+      res.writeHead(200, { 'content-type': 'video/mp2t' });
+      res.end(Buffer.alloc(2048, 7));
+      return;
+    }
+
+    if (url.pathname === '/api/login') {
+      // 回應含敏感 header 與 token，驗證遮蔽路徑
+      res.writeHead(200, {
+        'content-type': 'application/json',
+        'set-cookie': 'session=abc123secret; Path=/; HttpOnly',
+        'cache-control': 'no-store',
+      });
+      res.end(
+        JSON.stringify({
+          accessToken:
+            'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U',
+          email: 'user@example.com',
+          displayName: 'Alice',
+        }),
+      );
+      return;
+    }
+
     // 操作觸發走 /api/data 與 /api/shared，
     // 雜訊走 /api/poll 與 /api/prefetch。
     // 分開端點是為了讓 urlPattern 能區分兩者（見 periodic.ts 註解）。

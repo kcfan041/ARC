@@ -4,7 +4,11 @@ import type {
   FlowRecord,
   StrategyName,
 } from '@arc/core-model';
-import { startRecording, type RecordingSession } from '@arc/browser-runtime';
+import {
+  startRecording,
+  type CaptureOptions,
+  type RecordingSession,
+} from '@arc/browser-runtime';
 import { STRATEGIES } from '@arc/correlator';
 
 /**
@@ -32,12 +36,28 @@ export type SessionStatus = {
   flowCount: number;
   /** 被綁定策略過濾掉的 flow 數量。對應 S1 的 c9 限制。 */
   filteredCount: number;
+  /** Response body 擷取的預算狀態 */
+  capture: {
+    usedBytes: number;
+    totalBytes: number;
+    exceeded: boolean;
+    skipped: number;
+  };
 };
 
 export type SessionOptions = {
   headless?: boolean;
   strategy?: StrategyName;
   windowMs?: number;
+  /** Response body 擷取策略。見 browser-runtime/capture.ts。 */
+  capture?: CaptureOptions;
+  /**
+   * body 的儲存位置。由 Workspace 接上 ProjectStore.putObject，
+   * 未提供時 recorder 會暫存於記憶體。
+   */
+  putObject?: (content: Buffer, mime?: string, url?: string) => string;
+  /** 與 putObject 對應的讀取端 */
+  getObject?: (hash: string) => Buffer | undefined;
 };
 
 type Listener = (ev: SessionEvent) => void;
@@ -94,12 +114,17 @@ export class InvestigationSession {
       actionCount: this.actions.length,
       flowCount: this.flows.length,
       filteredCount: Math.max(0, this.flows.length - bound.size),
+      capture: this.captureBudget(),
     };
   }
 
   async start(url?: string): Promise<void> {
     if (this.rec) return;
-    this.rec = await startRecording({ headless: this.opts.headless ?? false });
+    this.rec = await startRecording({
+      headless: this.opts.headless ?? false,
+      ...(this.opts.capture ? { capture: this.opts.capture } : {}),
+      ...(this.opts.putObject ? { putObject: this.opts.putObject } : {}),
+    });
     if (url) await this.rec.page.goto(url, { waitUntil: 'domcontentloaded' });
 
     // recorder 目前以陣列累積事件，尚無 callback 介面。
@@ -157,6 +182,34 @@ export class InvestigationSession {
    *   只有 changes 中列出的 query 參數會被改變。
    *   因此在結構上無法呼叫「網站自己沒有呼叫過」的端點。
    */
+  /** Response body 的擷取預算使用情況 */
+  captureBudget(): {
+    usedBytes: number;
+    totalBytes: number;
+    exceeded: boolean;
+    skipped: number;
+  } {
+    const b = this.rec?.budget;
+    return {
+      usedBytes: b?.usedBytes ?? 0,
+      totalBytes: b?.totalBytes ?? 0,
+      exceeded: b?.exceeded ?? false,
+      skipped: b?.skipped ?? 0,
+    };
+  }
+
+  /**
+   * 取回已擷取的 response body。
+   *
+   * 有專案目錄時內容在 objects/，否則在 recorder 的記憶體暫存。
+   * 兩種情況都以同一個 content-addressed 雜湊定址。
+   */
+  getBody(hash: string): Buffer | undefined {
+    const inMemory = this.rec?.bodies.get(hash);
+    if (inMemory) return inMemory;
+    return this.opts.getObject?.(hash);
+  }
+
   async replay(
     flowId: string,
     changes: Record<string, unknown> = {},

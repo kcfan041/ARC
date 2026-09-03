@@ -41,6 +41,13 @@ export type CallFrame = {
   columnNumber: number;
 };
 
+export type BodyCaptureStatus =
+  | 'captured'
+  | 'truncated'
+  | 'budget-exceeded'
+  | 'skipped'
+  | 'unavailable';
+
 export type FlowRecord = {
   id: string;
   requestId: string;
@@ -53,6 +60,22 @@ export type FlowRecord = {
     type: string;
     stack?: { callFrames: CallFrame[] };
     url?: string;
+  };
+  requestHeaders?: Record<string, string>;
+  response?: {
+    status: number;
+    statusText?: string;
+    headers?: Record<string, string>;
+    mimeType?: string;
+    fromCache?: boolean;
+    encodedDataLength?: number;
+  };
+  body?: {
+    status: BodyCaptureStatus;
+    hash?: string;
+    size?: number;
+    storedSize?: number;
+    base64?: boolean;
   };
 };
 
@@ -70,6 +93,13 @@ export type SessionStatus = {
   flowCount: number;
   /** 被綁定策略過濾掉的 flow 數。對應 S1 的 c9 已知限制。 */
   filteredCount: number;
+  /** Response body 擷取的預算狀態 */
+  capture?: {
+    usedBytes: number;
+    totalBytes: number;
+    exceeded: boolean;
+    skipped: number;
+  };
 };
 
 export type Snapshot = {

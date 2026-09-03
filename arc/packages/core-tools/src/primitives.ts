@@ -53,6 +53,20 @@ const PAGE_ARGS = {
   offset: { type: 'number', description: '起始位置', default: 0 },
 };
 
+/** 未擷取到內容時的說明。這些都是正常結果，不是錯誤。 */
+const BODY_STATUS_REASON: Record<string, string> = {
+  'budget-exceeded': '已達本次工作階段的儲存上限，之後的回應內容未擷取',
+  skipped: '此類型預設不擷取（例如串流影片的分段檔）',
+  unavailable: '瀏覽器已無法提供此回應內容（可能來自快取或已被清除）',
+};
+
+/** 判斷 MIME 是否為文字類。二進位內容不直接回傳原始資料。 */
+function isTextualMime(mime: string): boolean {
+  if (!mime) return false;
+  if (mime.startsWith('text/')) return true;
+  return /(json|javascript|xml|x-www-form-urlencoded|graphql)/i.test(mime);
+}
+
 /**
  * 註冊所有內建原語，並提供 capability 實作。
  *
@@ -180,6 +194,93 @@ export function registerPrimitives(
       (args) => {
         const f = session.flows.find((x) => x.id === args.flowId);
         return f ? ok(f) : fail('NOT_FOUND', `no such flow: ${args.flowId}`);
+      },
+    ],
+
+    [
+      builtin({
+        name: 'network_get_body',
+        title: '取得回應內容',
+        description:
+          '取得某個請求的回應內容。這是查看 API 實際回傳什麼資料的方式。' +
+          '文字類內容（JSON、HTML、JavaScript）會直接回傳；' +
+          '二進位內容（圖片、影片）只回報大小與類型，不回傳內容本身。' +
+          '若回應未被擷取，會說明原因。',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            flowId: { type: 'string', description: '請求識別碼，例如 flow_12' },
+            maxBytes: {
+              type: 'number',
+              description: '回傳的最大字元數，超過則截斷',
+              default: 64 * 1024,
+            },
+          },
+          required: ['flowId'],
+        },
+        capabilities: ['session.read'],
+        annotations: { readOnlyHint: true, idempotentHint: true },
+      }),
+      (args) => {
+        const flow = session.flows.find((x) => x.id === args.flowId);
+        if (!flow) return fail('NOT_FOUND', `no such flow: ${args.flowId}`);
+
+        const body = flow.body;
+        if (!body) {
+          return ok({
+            flowId: flow.id,
+            available: false,
+            reason: '此請求尚未完成，或回應內容未被擷取',
+          });
+        }
+
+        if (body.status !== 'captured' && body.status !== 'truncated') {
+          return ok({
+            flowId: flow.id,
+            available: false,
+            captureStatus: body.status,
+            reason: BODY_STATUS_REASON[body.status],
+            ...(body.size !== undefined ? { size: body.size } : {}),
+          });
+        }
+
+        const raw = body.hash ? session.getBody(body.hash) : undefined;
+        if (!raw) {
+          return ok({
+            flowId: flow.id,
+            available: false,
+            reason: '內容參照存在但檔案已不可讀取',
+          });
+        }
+
+        const mime = flow.response?.mimeType ?? '';
+        // 二進位內容不回傳原始位元組 —— 對 LLM 無意義，
+        // 且 base64 會膨脹 33% 佔滿 context
+        if (body.base64 && !isTextualMime(mime)) {
+          return ok({
+            flowId: flow.id,
+            available: true,
+            binary: true,
+            mimeType: mime,
+            size: body.size,
+            hash: body.hash,
+            note: '二進位內容，未回傳原始資料。可用 hash 從專案目錄取得。',
+          });
+        }
+
+        const limit = Number(args.maxBytes) || 64 * 1024;
+        const text = raw.toString('utf8');
+        const clipped = text.length > limit;
+
+        return ok({
+          flowId: flow.id,
+          available: true,
+          mimeType: mime,
+          size: body.size,
+          captureStatus: body.status,
+          truncated: clipped || body.status === 'truncated',
+          content: clipped ? text.slice(0, limit) : text,
+        });
       },
     ],
 

@@ -81,11 +81,25 @@ export class Workspace {
 
   constructor(opts: WorkspaceOptions = {}) {
     const { projectDir, ...sessionOpts } = opts;
-    this.session = new InvestigationSession(sessionOpts);
+
+    // 有專案目錄時，body 直接進 objects/ 而非留在記憶體。
+    // store 必須先於 session 建立 —— session 啟動時就要能寫入。
+    if (projectDir) this.store = new ProjectStore(projectDir);
+    const store = this.store;
+
+    this.session = new InvestigationSession({
+      ...sessionOpts,
+      ...(store
+        ? {
+            putObject: (content, mime, url) =>
+              store.putObject(content, mime, url),
+            getObject: (hash) => store.getObject(hash),
+          }
+        : {}),
+    });
     registerPrimitives(this.registry, this.session);
 
     if (projectDir) {
-      this.store = new ProjectStore(projectDir);
       this.loadPersistedTools();
     }
   }

@@ -32,6 +32,7 @@ export function useSession() {
     actionCount: 0,
     flowCount: 0,
     filteredCount: 0,
+    capture: { usedBytes: 0, totalBytes: 0, exceeded: false, skipped: 0 },
   });
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);

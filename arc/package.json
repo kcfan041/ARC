@@ -25,7 +25,8 @@
     "store:check": "npm run store --workspace @arc/spike-s1",
     "import:check": "npm run import --workspace @arc/spike-s1",
     "discovery:check": "npm run discovery --workspace @arc/spike-s1",
-    "coverage:check": "npm run coverage --workspace @arc/spike-s1"
+    "coverage:check": "npm run coverage --workspace @arc/spike-s1",
+    "body:check": "npm run body --workspace @arc/spike-s1"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
