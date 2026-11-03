@@ -4,6 +4,7 @@ import { Timeline } from './panels/Timeline';
 import { NetworkList } from './panels/NetworkList';
 import { FlowDetail } from './panels/FlowDetail';
 import { Tools } from './panels/Tools';
+import { Storage } from './panels/Storage';
 
 /**
  * ARC 主畫面
@@ -21,7 +22,7 @@ import { Tools } from './panels/Tools';
  *   共用的成熟模式，使用者不需重新學習。
  */
 
-type Tab = 'timeline' | 'network' | 'tools';
+type Tab = 'timeline' | 'network' | 'storage' | 'tools';
 
 function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -86,6 +87,12 @@ export function App() {
             Network
           </button>
           <button
+            className={'tab' + (tab === 'storage' ? ' on' : '')}
+            onClick={() => setTab('storage')}
+          >
+            Storage
+          </button>
+          <button
             className={'tab' + (tab === 'tools' ? ' on' : '')}
             onClick={() => setTab('tools')}
           >
@@ -94,10 +101,10 @@ export function App() {
         </nav>
       </header>
 
-      {tab === 'tools' ? (
+      {tab === 'tools' || tab === 'storage' ? (
         // 工具面板自帶主從式版面，佔滿整個工作區
         <main className="body body-full">
-          <Tools />
+          {tab === 'tools' ? <Tools /> : <Storage />}
         </main>
       ) : (
         <main className="body">

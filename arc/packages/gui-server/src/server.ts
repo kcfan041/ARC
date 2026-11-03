@@ -111,6 +111,10 @@ export async function startGuiServer(opts: GuiServerOptions = {}) {
           );
           return;
         }
+        if (url.pathname === '/api/storage' && req.method === 'GET') {
+          res.end(JSON.stringify(await workspace.callTool('storage_get', {})));
+          return;
+        }
 
         // ── 工具面板 ────────────────────────────────────
         //

@@ -102,6 +102,23 @@ export type SessionStatus = {
   };
 };
 
+export type CookieRecord = {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  httpOnly: boolean;
+  secure: boolean;
+  expires?: number;
+};
+
+export type StorageSnapshot = {
+  cookies: CookieRecord[];
+  localStorage: Record<string, string>;
+  sessionStorage: Record<string, string>;
+  at: number;
+};
+
 export type Snapshot = {
   actions: ActionRecord[];
   flows: FlowRecord[];
